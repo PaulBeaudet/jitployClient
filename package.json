@@ -1,0 +1,23 @@
+{
+  "name": "jitployclient",
+  "version": "1.0.0",
+  "description": "service that manages deployment of others services and itself",
+  "main": "deploy.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PaulBeaudet/jitployClient.git"
+  },
+  "author": "Paul Beaudet",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/PaulBeaudet/jitployClient/issues"
+  },
+  "homepage": "https://github.com/PaulBeaudet/jitployClient#readme",
+  "dependencies": {
+    "commander": "^2.11.0",
+    "socket.io-client": "^2.0.3"
+  }
+}
