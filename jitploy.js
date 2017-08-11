@@ -60,12 +60,12 @@ var config = {
         env: {}
     }, // ultimately config vars are stored here and past to program being tracked
     run: function(onFinsh){
-        var readFile = fs.createReadStream(__dirname + '/encrypted_' + config.env);
+        var readFile = fs.createReadStream(cmd.path + '/config/encrypted_' + config.env);
         var decrypt = config.crypto.createDecipher('aes-256-ctr',  cli.program.key); // TODO probably should be passed in instead
-        var writeFile = fs.createWriteStream(__dirname + '/decrypted_' + config.env + '.js');
+        var writeFile = fs.createWriteStream(cmd.path + '/config/decrypted_' + config.env + '.js');
         readFile.pipe(decrypt).pipe(writeFile);
         writeFile.on('finish', function(){
-            config.options.env = require(__dirname + '/decrypted_' + config.env + '.js');
+            config.options.env = require(cmd.path + '/config/decrypted_' + config.env + '.js');
             onFinsh(); // call next thing to do, prabably npm install
         });
 
@@ -76,7 +76,7 @@ var run = {
     child: require('child_process'),
     cmd: function(command, cmdName, onSuccess, onFail){
         console.log('running command:' + command);
-        run[cmdName] = run.child.exec(command, config.options);
+        run[cmdName] = run.child.exec(run.cwd + command, config.options); // cwd makes sure we are in working directory that we originated from
         run[cmdName].stdout.on('data', function(data){console.log("" + data);});
         run[cmdName].stderr.on('data', function(data){console.log("" + data);});
         run[cmdName].on('close', function doneCommand(code){
@@ -93,7 +93,7 @@ var run = {
         });
     },
     install: function(){ // and probably restart when done
-        run.cmd('cd ' + __dirname + ' &&' + PATH + 'npm install', 'npmInstall', function installSuccess(){
+        run.cmd(PATH + 'npm install', 'npmInstall', function installSuccess(){
             run.start(run.service); // if its not already, start service up
         }, function installFail(code){
             console.log('bad install? ' + code);
@@ -104,24 +104,24 @@ var run = {
             run.service.kill(); // send kill signal to current process then start it again
             console.log('restart with code: ' + code);
         }
-        run.cmd('cd ' + __dirname + ' &&' + PATH + 'npm run start', 'service', run.start, run.start);
+        run.cmd(PATH + 'npm run start', 'service', run.start, run.start);
     }
 };
 
 
 var cmd = {
     run: function(service){
-        /*if(cmd.insuficientFlags()){
+        if(cmd.insuficientFlags()){
             console.log('sorry youll need to put in flags as if they were required config vars');
             return;
-        }*/
+        }
         cmd.path = path.resolve(path.dirname(service));
-        run.cdToWorkingPath = 'cd ' + cmd.path + ' ';
+        run.cwd = 'cd ' + cmd.path + ' && '; // prepended to every command to be sure we are in correct directory
         console.log(run.cdToWorkingPath);
         console.log(cmd.path);
         cmd.checkConfig(function ifConfigFolder(){
-            // jitploy.init(cli.program.server, cli.program.token, cli.program.repo);
-            // run.deploy();
+            jitploy.init(cli.program.server, cli.program.token, cli.program.repo);
+            run.deploy();
         });
     },
     insuficientFlags: function(){
