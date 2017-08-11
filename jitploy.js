@@ -1,4 +1,8 @@
-// deploy.js  services that imediately deploys this service when it need to be updated
+#!/usr/bin/env node
+// jitploy.js ~ Copyright 2017 ~ Paul Beaudet MIT License
+
+var path = require('path');
+
 var PATH = ' PATH=' + process.env.PATH + ' ';// assuming this is started manually, will help find node/npm, otherwise exact paths are needed
 
 var jitploy = {
@@ -16,18 +20,17 @@ var jitploy = {
 };
 
 var config = {
-    env: process.env.ENVIRONMENT,
-    key: process.env.CONFIG_KEY,
+    env: 'local', // process.env.ENVIRONMENT, // hard coding to local for now
     crypto: require('crypto'),
     fs: require('fs'),
     options: {}, // ultimately config vars are stored here and past to program being tracked
-    run: function(onFinsh){
-        var readFile = config.fs.createReadStream(__dirname + '/encrypted_' + config.env);
-        var decrypt = config.crypto.createDecipher('aes-256-ctr', config.key);
-        var writeFile = config.fs.createWriteStream(__dirname + '/decrypted_' + config.env + '.js');
+    run: function(serviceDir, onFinsh){
+        var readFile = config.fs.createReadStream(serviceDir + '/config/encrypted_' + config.env);
+        var decrypt = config.crypto.createDecipher('aes-256-ctr', cli.program.key); // TODO probably should be passed in instead
+        var writeFile = config.fs.createWriteStream(serviceDir + '/config/decrypted_' + config.env + '.js');
         readFile.pipe(decrypt).pipe(writeFile);
         writeFile.on('finish', function(){
-            config.options = {env: require(__dirname + '/decrypted_' + config.env + '.js')};
+            config.options = {env: require(serviceDir + '/config/decrypted_' + config.env + '.js')};
             onFinsh(); // call next thing to do, prabably npm install
         });
 
@@ -36,7 +39,7 @@ var config = {
 
 var run = {
     child: require('child_process'),
-    deploy: function(){ // or at least start to
+    deploy: function(service){ // or at least start to
         var gitPull = run.child.exec('git pull');
         gitPull.stdout.on('data', function(data){console.log("" + data);});
         gitPull.stderr.on('data', function(data){console.log("" + data);});
@@ -67,5 +70,33 @@ var run = {
     }
 };
 
-jitploy.init(process.env.JITPLOY_SERVER, process.env.CONNECT_TOKEN, process.env.REPO_NAME);
-run.deploy();
+var cmd = {
+    run: function(service){
+        if(cli.program.server && cli.program.token && cli.program.repo && cli.program.key){
+            jitploy.init(cli.program.server, cli.program.token, cli.program.repo);
+            // run.deploy(service);
+        } else {
+            console.log('sorry youll need to put in flags as if they were required config vars');
+        }
+    }
+}
+
+var cli = {
+    program: require('commander'),
+    setup: function(){
+        cli.program
+            .version('0.0.1')
+            .usage('[options] <file ...>')
+            .option('-k, --key <key>', 'key to unlock service config')
+            .option('-t, --token <token>', 'config token to use service')
+            .option('-r, --repo <repo>', 'repo name')
+            .option('-s, --server <server>', 'jitploy server to connect to')
+            .arguments('<service>')
+            .action(cmd.run);
+            
+        cli.program.parse(process.argv);
+        if(cli.program.args.length === 0){cli.program.help();}
+    }
+}
+
+cli.setup();

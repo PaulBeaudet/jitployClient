@@ -1,8 +1,11 @@
 {
-  "name": "jitployclient",
-  "version": "1.0.0",
+  "name": "jitploy",
+  "version": "1.0.4",
   "description": "service that manages deployment of others services and itself",
-  "main": "deploy.js",
+  "main": "jitploy.js",
+  "bin": {
+    "jitploy": "jitploy.js"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
