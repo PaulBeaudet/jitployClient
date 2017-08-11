@@ -2,6 +2,7 @@
 // jitploy.js ~ Copyright 2017 ~ Paul Beaudet MIT License
 
 var path = require('path');
+var fs = require('fs');
 var PATH = ' PATH=' + process.env.PATH + ' ';// assuming this is started manually, will help find node/npm, otherwise exact paths are needed
 
 var CD_HOURS_START = 11;                     // 12 pm Defines hours when deployments can happen
@@ -55,14 +56,13 @@ var jitploy = {
 var config = {
     env: 'local', // process.env.ENVIRONMENT, // hard coding to local for now
     crypto: require('crypto'),
-    fs: require('fs'),
     options: {
         env: {}
     }, // ultimately config vars are stored here and past to program being tracked
     run: function(onFinsh){
-        var readFile = config.fs.createReadStream(__dirname + '/encrypted_' + config.env);
+        var readFile = fs.createReadStream(__dirname + '/encrypted_' + config.env);
         var decrypt = config.crypto.createDecipher('aes-256-ctr',  cli.program.key); // TODO probably should be passed in instead
-        var writeFile = config.fs.createWriteStream(__dirname + '/decrypted_' + config.env + '.js');
+        var writeFile = fs.createWriteStream(__dirname + '/decrypted_' + config.env + '.js');
         readFile.pipe(decrypt).pipe(writeFile);
         writeFile.on('finish', function(){
             config.options.env = require(__dirname + '/decrypted_' + config.env + '.js');
@@ -110,18 +110,37 @@ var run = {
 
 
 var cmd = {
-    absPath: '.',
     run: function(service){
-        cmd.absPath = path.resolve(service);
-        run.cdToWorkingPath = 'cd ' + path.dirname(service) + ' ';
-        console.log(run.cdToWorkingPath);
-        console.log(cmd.absPath);
-        if(cli.program.server && cli.program.token && cli.program.repo && cli.program.key){
-            jitploy.init(cli.program.server, cli.program.token, cli.program.repo);
-            // run.deploy();
-        } else {
+        /*if(cmd.insuficientFlags()){
             console.log('sorry youll need to put in flags as if they were required config vars');
+            return;
+        }*/
+        cmd.path = path.resolve(path.dirname(service));
+        run.cdToWorkingPath = 'cd ' + cmd.path + ' ';
+        console.log(run.cdToWorkingPath);
+        console.log(cmd.path);
+        cmd.checkConfig(function ifConfigFolder(){
+            // jitploy.init(cli.program.server, cli.program.token, cli.program.repo);
+            // run.deploy();
+        });
+    },
+    insuficientFlags: function(){
+        if(cli.program.server && cli.program.token && cli.program.repo && cli.program.key){
+            return false;
+        } else {
+            return true;
         }
+    },
+    checkConfig: function(successCallback){
+        fs.stat(cmd.path + '/config', function checkConfig(error, stats){
+            if(error){
+                console.log('no config folder: ' + error);
+            } else if (stats && stats.isDirectory()){
+                successCallback();
+            } else {
+                console.log('no config folder');
+            }
+        });
     }
 }
 
