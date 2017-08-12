@@ -94,7 +94,7 @@ var run = {
         });
     },
     install: function(){ // and probably restart when done
-        run.cmd('npm install', 'npmInstall', function installSuccess(){
+        run.cmd(PATH + 'npm install', 'npmInstall', function installSuccess(){
             run.start(run.service); // if its not already, start service up
         }, function installFail(code){
             console.log('bad install? ' + code);
@@ -105,7 +105,7 @@ var run = {
             run.service.kill(); // send kill signal to current process then start it again
             console.log('restart with code: ' + code);
         } else {                // process automatically restarts when it is running only run this command when its not
-            run.cmd('npm run start', 'service', run.start, run.start);
+            run.cmd(PATH + 'npm run start', 'service', run.start, run.start);
         }
     }
 };
@@ -119,8 +119,6 @@ var cmd = {
         }
         cmd.path = path.resolve(path.dirname(service));
         run.cwd = 'cd ' + cmd.path + ' && '; // prepended to every command to be sure we are in correct directory
-        console.log(run.cdToWorkingPath);
-        console.log(cmd.path);
         cmd.checkConfig(function ifConfigFolder(){
             jitploy.init(cli.program.server, cli.program.token, cli.program.repo);
             run.deploy();
