@@ -75,8 +75,9 @@ var config = {
 var run = {
     child: require('child_process'),
     cmd: function(command, cmdName, onSuccess, onFail){
+        command = run.cwd + command; // cwd makes sure we are in working directory that we originated from
         console.log('running command:' + command);
-        run[cmdName] = run.child.exec(run.cwd + command, config.options); // cwd makes sure we are in working directory that we originated from
+        run[cmdName] = run.child.exec(command, config.options);
         run[cmdName].stdout.on('data', function(data){console.log("" + data);});
         run[cmdName].stderr.on('data', function(data){console.log("" + data);});
         run[cmdName].on('close', function doneCommand(code){
@@ -93,7 +94,7 @@ var run = {
         });
     },
     install: function(){ // and probably restart when done
-        run.cmd(PATH + 'npm install', 'npmInstall', function installSuccess(){
+        run.cmd('npm install', 'npmInstall', function installSuccess(){
             run.start(run.service); // if its not already, start service up
         }, function installFail(code){
             console.log('bad install? ' + code);
@@ -104,7 +105,7 @@ var run = {
             run.service.kill(); // send kill signal to current process then start it again
             console.log('restart with code: ' + code);
         } else {                // process automatically restarts when it is running only run this command when its not
-            run.cmd(PATH + 'npm run start', 'service', run.start, run.start);
+            run.cmd('npm run start', 'service', run.start, run.start);
         }
     }
 };
