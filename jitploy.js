@@ -103,8 +103,9 @@ var run = {
         if(code){               // anything besides 0 is a case where we need to restart
             run.service.kill(); // send kill signal to current process then start it again
             console.log('restart with code: ' + code);
+        } else {                // process automatically restarts when it is running only run this command when its not
+            run.cmd(PATH + 'npm run start', 'service', run.start, run.start);
         }
-        run.cmd(PATH + 'npm run start', 'service', run.start, run.start);
     }
 };
 
