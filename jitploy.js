@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// jitploy.js ~ Copyright 2017 ~ Paul Beaudet MIT License
+// jitploy.js ~ CLIENT ~ Copyright 2017 ~ Paul Beaudet MIT License
 
 var path = require('path');
 var fs = require('fs');
@@ -95,18 +95,18 @@ var run = {
     },
     install: function(){ // and probably restart when done
         run.cmd(PATH + 'npm install', 'npmInstall', function installSuccess(){
-            run.start(run.service); // if its not already, start service up
+            if(run.service){
+                run.service.kill();       // send kill signal to current process then start it again
+            } else {
+                run.start('starting up'); // given first start get recursive restart ball rolling
+            }
         }, function installFail(code){
             console.log('bad install? ' + code);
         });
     },
     start: function(code){
-        if(code){               // anything besides 0 is a case where we need to restart
-            run.service.kill(); // send kill signal to current process then start it again
-            console.log('restart with code: ' + code);
-        } else {                // process automatically restarts when it is running only run this command when its not
-            run.cmd(PATH + 'npm run start', 'service', run.start, run.start);
-        }
+        console.log('restart event ' + code); // process automatically restarts in any case it stops
+        run.cmd(PATH + 'npm run start', 'service', run.start, run.start);
     }
 };
 
