@@ -96,9 +96,9 @@ var run = {
     install: function(){ // and probably restart when done
         run.cmd(PATH + 'npm install', 'npmInstall', function installSuccess(){
             if(run.service){
-                run.service.kill();       // send kill signal to current process then start it again
+                run.service.kill('SIGINT'); // send kill signal to current process then start it again
             } else {
-                run.start('starting up'); // given first start get recursive restart ball rolling
+                run.start('starting up');    // given first start get recursive restart ball rolling
             }
         }, function installFail(code){
             console.log('bad install? ' + code);
