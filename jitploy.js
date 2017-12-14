@@ -3,10 +3,10 @@
 
 var path = require('path');
 var fs = require('fs');
-var PATH = ' PATH=' + process.env.PATH + ' ';// assuming this is started manually, will help find node/npm, otherwise exact paths are needed
+// var PATH = ' PATH=' + process.env.PATH + ' ';// assuming this is started manually, will help find node/npm, otherwise exact paths are needed
 
 var CD_HOURS_START = 11;                     // 12 pm Defines hours when deployments can happen
-var CD_HOURS_END   = 22;                     // 11 pm
+var CD_HOURS_END   = 16;                     // 5 pm
 
 var getMillis = {
     toTimeTomorrow: function(hour){                     // millitary hour minus one
@@ -34,11 +34,11 @@ var jitploy = {
     init: function(server, token, repoName){
         jitploy.client = jitploy.io(server);                   // jitploy socket server connection initiation
         jitploy.client.on('connect', function authenticate(){  // connect with orcastrator
-            jitploy.client.emit('authenticate', {
+            jitploy.client.emit('authenticate', {              // NOTE assumes TLS is in place otherwise this is useless
                 token: token,
                 name: repoName,
             });                                                // its important lisner know that we are for real
-            jitploy.client.on('deploy', run.deploy);           // respond to deploy events
+            jitploy.client.on('deploy', run.initCD);           // respond to deploy events
         });
         var timeToSleep = getMillis.toOffHours(CD_HOURS_START, CD_HOURS_END);
         setTimeout(function(){
@@ -54,26 +54,27 @@ var jitploy = {
 };
 
 var config = {
-    env: 'local', // process.env.ENVIRONMENT, // hard coding to local for now
+    env: 'local', // process.env.ENVIRONMENT, // hard coding to local for now TODO make this configurable
     crypto: require('crypto'),
     options: {
         env: {}
     }, // ultimately config vars are stored here and past to program being tracked
-    run: function(onFinsh){
+    run: function(configKey, onFinsh){
         var readFile = fs.createReadStream(cmd.path + '/config/encrypted_' + config.env);
-        var decrypt = config.crypto.createDecipher('aes-256-ctr',  cli.program.key); // TODO probably should be passed in instead
+        var decrypt = config.crypto.createDecipher('aes-256-ctr',  configKey);
         var writeFile = fs.createWriteStream(cmd.path + '/config/decrypted_' + config.env + '.js');
         readFile.pipe(decrypt).pipe(writeFile);
         writeFile.on('finish', function(){
             config.options.env = require(cmd.path + '/config/decrypted_' + config.env + '.js');
-            onFinsh(); // call next thing to do, prabably npm install
+            onFinsh(); // call next thing to do, prabably npm install // TODO probably should be passing environment vars
         });
-
     }
 };
 
 var run = {
     child: require('child_process'),
+    config: { has: false },          // default to false in case no can has config deploys assuming static config
+    pm2service: false,
     cmd: function(command, cmdName, onSuccess, onFail){
         command = run.cwd + command; // cwd makes sure we are in working directory that we originated from
         console.log('running command:' + command);
@@ -86,19 +87,36 @@ var run = {
         });
         run[cmdName].on('error', function(error){console.log('child exec error: ' + error);});
     },
-    deploy: function(){ // or at least start to
-        run.cmd('git pull', 'gitPull', function pullSuccess(){
-            config.run(run.install); // decrypt configuration then install
+    initCD: function(hasConfig, configKey, pm2service){        // runs either on start up or every time jitploy server pings
+        if(pm2service){run.pm2service = pm2service;}
+        run.cmd('git pull', 'gitPull', function pullSuccess(){ // pull new code
+            if(run.config.has){                                // has config already been stored: deploy cases
+                config.run(run.config.key, run.install);       // decrypt configuration then install
+            } else if (hasConfig){
+                if(hasConfig && configKey){                    // on the first run if we have a config, in this way populating config means its possible
+                    run.config.has = hasConfig;                // only try to do any of this with a config folder
+                    run.config.key = configKey;                // want to remember key so it can be passed each deploy
+                    config.run(run.config.key, run.install);   // decrypt configuration then install
+                } else {
+                    console('no can has config ');             // probably forgot to pass config key
+                }
+            } else {                                           // otherwise assume config is static on server
+                run.install();                                 // npm install step, reflect package.json changes
+            }
         }, function pullFail(code){
             console.log('no pull? ' + code);
         });
     },
-    install: function(){ // and probably restart when done
-        run.cmd(PATH + 'npm install', 'npmInstall', function installSuccess(){
-            if(run.service){
-                run.service.kill('SIGINT'); // send kill signal to current process then start it again
-            } else {
-                run.start('starting up');    // given first start get recursive restart ball rolling
+    install: function(usePm2){ // and probably restart when done
+        run.cmd('npm install', 'npmInstall', function installSuccess(){
+            if(run.pm2.service){  // in case pm2 is managing service
+                run.pm2Restart(run.pm2.service);
+            } else {         // otherwise this process is managing service
+                if(run.service){
+                    run.service.kill('SIGINT'); // send kill signal to current process then start it again
+                } else {
+                    run.start('starting up');    // given first start get recursive restart ball rolling
+                }
             }
         }, function installFail(code){
             console.log('bad install? ' + code);
@@ -106,49 +124,59 @@ var run = {
     },
     start: function(code){
         console.log('restart event ' + code); // process automatically restarts in any case it stops
-        run.cmd(PATH + 'npm run start', 'service', run.start, run.start);
+        run.cmd('npm run start', 'service', run.start, run.start);
+    },
+    pm2Restart: function(nameOfService){
+        run.cmd('pm2 restart ' + nameOfService, 'service', function restartSuccess(){
+            console.log('restart success?');
+        }, function restartFail(code){
+            console.log('pm2 restart fail ' + code);
+        });
     }
 };
 
 
 var cmd = {
     run: function(service){
-        if(cmd.insuficientFlags()){
+        if(cli.program.server && cli.program.token && cli.program.repo){
+        } else {
             console.log('sorry youll need to put in flags as if they were required config vars');
             return;
         }
-        cmd.path = path.resolve(path.dirname(service));
+        if(service){
+            cmd.path = path.resolve(path.dirname(service)); // path of file that is passed
+        } else {
+            console.log('path of directory' + __dirname);   // TODO test if this works, probably not
+            cmd.path = path.resolve(__dirname);
+        }
         run.cwd = 'cd ' + cmd.path + ' && '; // prepended to every command to be sure we are in correct directory
-        cmd.checkConfig(function ifConfigFolder(){
-            jitploy.init(cli.program.server, cli.program.token, cli.program.repo);
-            run.deploy();
+        jitploy.init(cli.program.server, cli.program.token, cli.program.repo);
+        cmd.checkConfig(function hasConfig(configOrNoConfig){
+            if(service){
+                run.initCD(configOrNoConfig, cli.program.key);                   // given a file was passed assume this client is managing executible
+            } else {                                                             // assume service is being managed by pm2 if nothing is passed
+                run.initCD(configOrNoConfig, cli.program.key, cli.program.repo); // repo name should equate what service is named in pm2
+            }
         });
     },
-    insuficientFlags: function(){
-        if(cli.program.server && cli.program.token && cli.program.repo && cli.program.key){
-            return false;
-        } else {
-            return true;
-        }
-    },
-    checkConfig: function(successCallback){
+    checkConfig: function(hasConfig){
         fs.stat(cmd.path + '/config', function checkConfig(error, stats){
             if(error){
-                console.log('no config folder: ' + error);
+                console.log('on checking config folder: ' + error);
             } else if (stats && stats.isDirectory()){
-                successCallback();
+                hasConfig(true);
             } else {
-                console.log('no config folder');
+                hasConfig(false);
             }
         });
     }
-}
+};
 
 var cli = {
     program: require('commander'),
     setup: function(){
         cli.program
-            .version('0.0.1')
+            .version(require('./package.json').version) // this might work? seems questionable
             .usage('[options] <file ...>')
             .option('-k, --key <key>', 'key to unlock service config')
             .option('-t, --token <token>', 'config token to use service')
@@ -156,10 +184,10 @@ var cli = {
             .option('-s, --server <server>', 'jitploy server to connect to')
             .arguments('<service>')
             .action(cmd.run);
-            
+
         cli.program.parse(process.argv);
-        if(cli.program.args.length === 0){cli.program.help();}
+        if(cli.program.args.length > 1){cli.program.help();} // given more than one thing is pass show help
     }
-}
+};
 
 cli.setup();
