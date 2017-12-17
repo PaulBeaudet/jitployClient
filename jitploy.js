@@ -1,12 +1,9 @@
 #!/usr/bin/env node
 // jitploy.js ~ CLIENT ~ Copyright 2017 ~ Paul Beaudet MIT License
-
 var path = require('path');
 var fs = require('fs');
-// var PATH = ' PATH=' + process.env.PATH + ' ';// assuming this is started manually, will help find node/npm, otherwise exact paths are needed
-
-var CD_HOURS_START = 11;                     // 12 pm Defines hours when deployments can happen
-var CD_HOURS_END   = 16;                     // 5 pm
+var CD_HOURS_START = 16;    // 5  pm UTC / 12 EST  // Defines hours when deployments can happen
+var CD_HOURS_END   = 21;    // 10 pm UTC /  5 EST  // TODO Create an option to change default
 
 var getMillis = {
     toTimeTomorrow: function(hour){                     // millitary hour minus one
@@ -75,8 +72,10 @@ var run = {
     child: require('child_process'),
     config: { has: false },          // default to false in case no can has config deploys assuming static config
     pm2service: false,
+    servicePath: false,
+    PATH: process.env.PATH,
     cmd: function(command, cmdName, onSuccess, onFail){
-        command = run.cwd + command; // cwd makes sure we are in working directory that we originated from
+        command = 'cd ' + run.servicePath + ' && PATH=' + run.PATH + ' ' + command; // cwd makes sure we are in working directory that we originated from
         console.log('running command:' + command);
         run[cmdName] = run.child.exec(command, config.options);
         run[cmdName].stdout.on('data', function(data){console.log("" + data);});
@@ -87,33 +86,28 @@ var run = {
         });
         run[cmdName].on('error', function(error){console.log('child exec error: ' + error);});
     },
-    initCD: function(hasConfig, configKey, pm2service){        // runs either on start up or every time jitploy server pings
+    initCD: function(servicePath, hasConfig, configKey, pm2service){        // runs either on start up or every time jitploy server pings
+        if(servicePath){run.servicePath = servicePath;}
         if(pm2service){run.pm2service = pm2service;}
         run.cmd('git pull', 'gitPull', function pullSuccess(){ // pull new code
             if(run.config.has){                                // has config already been stored: deploy cases
                 config.run(run.config.key, run.install);       // decrypt configuration then install
-            } else if (hasConfig){
-                if(hasConfig && configKey){                    // on the first run if we have a config, in this way populating config means its possible
-                    run.config.has = hasConfig;                // only try to do any of this with a config folder
-                    run.config.key = configKey;                // want to remember key so it can be passed each deploy
-                    config.run(run.config.key, run.install);   // decrypt configuration then install
-                } else {
-                    console('no can has config ');             // probably forgot to pass config key
-                }
+            } else if (hasConfig && configKey){                // on the first run if we have a config, in this way populating config means its possible
+                run.config.has = hasConfig;                    // only try to do any of this with a config folder
+                run.config.key = configKey;                    // want to remember key so it can be passed each deploy
+                config.run(run.config.key, run.install);       // decrypt configuration then install
             } else {                                           // otherwise assume config is static on server
                 run.install();                                 // npm install step, reflect package.json changes
             }
-        }, function pullFail(code){
-            console.log('no pull? ' + code);
-        });
+        }, function pullFail(code){console.log('no pull? ' + code);});
     },
-    install: function(usePm2){ // and probably restart when done
+    install: function(){ // and probably restart when done
         run.cmd('npm install', 'npmInstall', function installSuccess(){
-            if(run.pm2.service){  // in case pm2 is managing service
-                run.pm2Restart(run.pm2.service);
-            } else {         // otherwise this process is managing service
+            if(run.pm2service){                  // in case pm2 is managing service
+                run.pm2Restart(run.pm2service);
+            } else {                             // otherwise this process is managing service
                 if(run.service){
-                    run.service.kill('SIGINT'); // send kill signal to current process then start it again
+                    run.service.kill('SIGINT');  // send kill signal to current process then start it again
                 } else {
                     run.start('starting up');    // given first start get recursive restart ball rolling
                 }
@@ -137,37 +131,28 @@ var run = {
 
 
 var cmd = {
-    run: function(service){
-        if(cli.program.server && cli.program.token && cli.program.repo){
+    run: function(service, options){
+        if(options.server && options.token && options.repo){
         } else {
             console.log('sorry youll need to put in flags as if they were required config vars');
             return;
         }
-        if(service){
-            cmd.path = path.resolve(path.dirname(service)); // path of file that is passed
-        } else {
-            console.log('path of directory' + __dirname);   // TODO test if this works, probably not
-            cmd.path = path.resolve(__dirname);
-        }
-        run.cwd = 'cd ' + cmd.path + ' && '; // prepended to every command to be sure we are in correct directory
-        jitploy.init(cli.program.server, cli.program.token, cli.program.repo);
-        cmd.checkConfig(function hasConfig(configOrNoConfig){
-            if(service){
-                run.initCD(configOrNoConfig, cli.program.key);                   // given a file was passed assume this client is managing executible
-            } else {                                                             // assume service is being managed by pm2 if nothing is passed
-                run.initCD(configOrNoConfig, cli.program.key, cli.program.repo); // repo name should equate what service is named in pm2
+        var servicePath = path.resolve(path.dirname(service));                       // path of file that is passed
+        jitploy.init(options.server, options.token, options.repo);
+        cmd.checkConfig(servicePath, function hasConfig(configOrNoConfig){
+            if(options.pm2){                                                          // given pm2 flag is passed
+                run.initCD(servicePath, configOrNoConfig, options.key, options.repo); // repo name should equate what service is named in pm2
+            } else {
+                run.initCD(servicePath, configOrNoConfig, options.key);               // given a file was passed assume this client is managing executible
             }
         });
     },
-    checkConfig: function(hasConfig){
-        fs.stat(cmd.path + '/config', function checkConfig(error, stats){
-            if(error){
-                console.log('on checking config folder: ' + error);
-            } else if (stats && stats.isDirectory()){
-                hasConfig(true);
-            } else {
-                hasConfig(false);
-            }
+    checkConfig: function(servicePath, hasConfig){
+        console.log('checking config');
+        fs.stat(servicePath + '/config', function checkConfig(error, stats){
+            if(error)                            {console.log('on checking config folder: ' + error);}
+            else if(stats && stats.isDirectory()){hasConfig(true);}
+            else                                 {hasConfig(false);}
         });
     }
 };
@@ -176,17 +161,18 @@ var cli = {
     program: require('commander'),
     setup: function(){
         cli.program
-            .version(require('./package.json').version) // this might work? seems questionable
-            .usage('[options] <file ...>')
+            .version(require('./package.json').version) // grabs currently published version
+            .usage('[options] <file ...>')              // as far as I understand this is just for the help dialog
             .option('-k, --key <key>', 'key to unlock service config')
             .option('-t, --token <token>', 'config token to use service')
             .option('-r, --repo <repo>', 'repo name')
             .option('-s, --server <server>', 'jitploy server to connect to')
-            .arguments('<service>')
+            .option('-p, --pm2 <pm2>', 'manage service with pm2')
+            // .arguments('<service>')                  // seems like it will take arguments either way
             .action(cmd.run);
 
         cli.program.parse(process.argv);
-        if(cli.program.args.length > 1){cli.program.help();} // given more than one thing is pass show help
+        if(cli.program.args.length === 0){cli.program.help();}
     }
 };
 
