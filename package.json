@@ -8,7 +8,7 @@
     },
     "scripts": {
         "start": "npm install -g jitploy && jitploy -V && echo \"THIS IS HOW YOU DO\"",
-        "post-version": "npm publish && git push && echo \"PUSH IT REAL GOOD!\"",
+        "postversion": "npm publish && git push && echo \"PUSH IT REAL GOOD!\"",
         "test": "echo \"Error: I wanna know what test is, I WANT YOU TO SHOW ME\""
     },
     "repository": {
