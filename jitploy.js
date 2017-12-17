@@ -86,7 +86,7 @@ var run = {
         });
         run[cmdName].on('error', function(error){console.log('child exec error: ' + error);});
     },
-    initCD: function(servicePath, hasConfig, configKey, pm2service){        // runs either on start up or every time jitploy server pings
+    initCD: function(servicePath, hasConfig, configKey, pm2service){ // runs either on start up or every time jitploy server pings
         if(servicePath){run.servicePath = servicePath;}
         if(pm2service){run.pm2service = pm2service;}
         run.cmd('git pull', 'gitPull', function pullSuccess(){ // pull new code
@@ -103,8 +103,7 @@ var run = {
     },
     install: function(){ // and probably restart when done
         run.cmd('npm install', 'npmInstall', function installSuccess(){
-            if(run.pm2service){                  // in case pm2 is managing service
-                run.pm2Restart(run.pm2service);
+            if(run.pm2service){                  // in case pm2 is managing service let it do restart. Make sure watch flag is set
             } else {                             // otherwise this process is managing service
                 if(run.service){
                     run.service.kill('SIGINT');  // send kill signal to current process then start it again
@@ -119,13 +118,6 @@ var run = {
     start: function(code){
         console.log('restart event ' + code); // process automatically restarts in any case it stops
         run.cmd('npm run start', 'service', run.start, run.start);
-    },
-    pm2Restart: function(nameOfService){
-        run.cmd('pm2 restart ' + nameOfService, 'service', function restartSuccess(){
-            console.log('restart success?');
-        }, function restartFail(code){
-            console.log('pm2 restart fail ' + code);
-        });
     }
 };
 
