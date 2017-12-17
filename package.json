@@ -1,26 +1,28 @@
 {
-  "name": "jitploy",
-  "version": "1.2.16",
-  "description": "service that manages deployment of others services and itself",
-  "main": "jitploy.js",
-  "bin": {
-    "jitploy": "jitploy.js"
-  },
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/PaulBeaudet/jitployClient.git"
-  },
-  "author": "Paul Beaudet",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/PaulBeaudet/jitployClient/issues"
-  },
-  "homepage": "https://github.com/PaulBeaudet/jitployClient#readme",
-  "dependencies": {
-    "commander": "^2.11.0",
-    "socket.io-client": "^2.0.3"
-  }
+    "name": "jitploy",
+    "version": "1.2.16",
+    "description": "service that manages deployment of others services",
+    "main": "jitploy.js",
+    "bin": {
+        "jitploy": "jitploy.js"
+    },
+    "scripts": {
+        "start": "npm install -g jitploy && jitploy -V && echo \"THIS IS HOW YOU DO\"",
+        "post-version": "npm publish && git push && echo \"PUSH IT REAL GOOD!\"",
+        "test": "echo \"Error: I wanna know what test is, I WANT YOU TO SHOW ME\""
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/PaulBeaudet/jitployClient.git"
+    },
+    "author": "Paul Beaudet",
+    "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/PaulBeaudet/jitployClient/issues"
+    },
+    "homepage": "https://github.com/PaulBeaudet/jitployClient#readme",
+    "dependencies": {
+        "commander": "^2.11.0",
+        "socket.io-client": "^2.0.3"
+    }
 }

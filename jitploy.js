@@ -140,7 +140,6 @@ var cmd = {
         });
     },
     checkConfig: function(servicePath, hasConfig){
-        console.log('checking config');
         fs.stat(servicePath + '/config', function checkConfig(error, stats){
             if(error)                            {console.log('on checking config folder: ' + error);}
             else if(stats && stats.isDirectory()){hasConfig(true);}
@@ -160,7 +159,6 @@ var cli = {
             .option('-r, --repo <repo>', 'repo name')
             .option('-s, --server <server>', 'jitploy server to connect to')
             .option('-p, --pm2 <pm2>', 'manage service with pm2')
-            // .arguments('<service>')                  // seems like it will take arguments either way
             .action(cmd.run);
 
         cli.program.parse(process.argv);
