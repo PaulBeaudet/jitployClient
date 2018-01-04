@@ -37,7 +37,7 @@ var jitploy = {
                 token: token,
                 name: repoName,
             });                                                // its important lisner know that we are for real
-            jitploy.client.on('deploy', run.initCD);           // respond to deploy events
+            jitploy.client.on('deploy', run.deploy);           // respond to deploy events
         });
         var timeToSleep = getMillis.toOffHours(CD_HOURS_START, CD_HOURS_END);
         setTimeout(function(){
@@ -67,12 +67,19 @@ var config = {
             config.options.env = require(cmd.path + '/config/decrypted_' + config.env + '.js');
             onFinsh(); // call next thing to do, prabably npm install // TODO probably should be passing environment vars
         });
+    },
+    check: function(servicePath, hasConfig){ // checks if config exist
+        fs.stat(servicePath + '/config', function checkConfig(error, stats){
+            if(error)                            {console.log('on checking config folder: ' + error);}
+            else if(stats && stats.isDirectory()){hasConfig(true);}
+            else                                 {hasConfig(false);}
+        });
     }
 };
 
 var run = {
     child: require('child_process'),
-    config: { has: false },          // default to false in case no can has config deploys assuming static config
+    config: false,                   // default to false in case no can has config deploys assuming static config
     pm2: false,                      // not whether service process is being managed my pm2 or this service
     servicePath: false,
     PATH: process.env.PATH,
@@ -88,16 +95,19 @@ var run = {
         });
         run[cmdName].on('error', function(error){console.log('child exec error: ' + error);});
     },
-    initCD: function(servicePath, hasConfig, configKey, pm2){ // runs either on start up or every time jitploy server pings
+    deploy: function(servicePath, configKey, pm2){ // runs either on start up or every time jitploy server pings
         if(servicePath){run.servicePath = servicePath;}
         if(pm2){run.pm2 = true;}
         run.cmd('git pull', 'gitPull', function pullSuccess(){ // pull new code
-            if(run.config.has){                                // has config already been stored: deploy cases
+            if(run.config){                                    // has config already been stored: deploy cases
                 config.run(run.config.key, run.install);       // decrypt configuration then install
-            } else if (hasConfig && configKey){                // on the first run if we have a config, in this way populating config means its possible
-                run.config.has = hasConfig;                    // only try to do any of this with a config folder
-                run.config.key = configKey;                    // want to remember key so it can be passed each deploy
-                config.run(run.config.key, run.install);       // decrypt configuration then install
+            } else if (configKey){                             // we need a key if we ever want to decrypt a config
+                config.check(servicePath, function(hasConfig){ // first check if we have a config folder with things to decrypt at all
+                    if(hasConfig){                             // only try to do any of this with a config folder
+                        run.config = configKey;                // want to remember key so it can be passed each deploy
+                        config.run(run.config.key, run.install); // decrypt configuration then install
+                    }
+                });
             } else {                                           // otherwise assume config is static on server
                 run.install();                                 // npm install step, reflect package.json changes
             }
@@ -126,22 +136,13 @@ var run = {
 
 var cmd = {
     run: function(service, options){
-        if(!options.token && !options.repo){                                          // given required options are missing
-            console.log('sorry youll need to put in flags as if they were required config vars');
+        if(!options.token && !options.repo){                        // given required options are missing
+            console.log('missing required config vars');
             return;
         }
-        var servicePath = path.resolve(path.dirname(service));                        // path of file that is passed
-        jitploy.init(options.token, options.repo, options.server);                    // start up socket client
-        cmd.checkConfig(servicePath, function hasConfig(configOrNoConfig){
-            run.initCD(servicePath, configOrNoConfig, options.key, options.pm2);
-        });
-    },
-    checkConfig: function(servicePath, hasConfig){
-        fs.stat(servicePath + '/config', function checkConfig(error, stats){
-            if(error)                            {console.log('on checking config folder: ' + error);}
-            else if(stats && stats.isDirectory()){hasConfig(true);}
-            else                                 {hasConfig(false);}
-        });
+        var servicePath = path.resolve(path.dirname(service));      // path of file that is passed
+        jitploy.init(options.token, options.repo, options.server);  // start up socket client
+        run.deploy(servicePath, options.key, options.pm2);          // runs deployment steps
     }
 };
 
