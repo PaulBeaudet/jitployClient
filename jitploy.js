@@ -133,19 +133,6 @@ var run = {
     }
 };
 
-
-var cmd = {
-    run: function(service, options){
-        if(!options.token && !options.repo){                        // given required options are missing
-            console.log('missing required config vars');
-            return;
-        }
-        var servicePath = path.resolve(path.dirname(service));      // path of file that is passed
-        jitploy.init(options.token, options.repo, options.server);  // start up socket client
-        run.deploy(servicePath, options.key, options.pm2);          // runs deployment steps
-    }
-};
-
 var cli = {
     program: require('commander'),
     setup: function(){
@@ -157,10 +144,19 @@ var cli = {
             .option('-r, --repo <repo>', 'repo name')
             .option('-s, --server <server>', 'jitploy server to connect to')
             .option('-p, --pm2 <pm2>', 'manage service with pm2')
-            .action(cmd.run);
+            .action(cli.run);
 
         cli.program.parse(process.argv);
         if(cli.program.args.length === 0){cli.program.help();}
+    },
+    run: function(service, options){
+        if(!options.token && !options.repo){                        // given required options are missing
+            console.log('missing required config vars');
+            return;
+        }
+        var servicePath = path.resolve(path.dirname(service));      // path of file that is passed
+        jitploy.init(options.token, options.repo, options.server);  // start up socket client
+        run.deploy(servicePath, options.key, options.pm2);          // runs deployment steps
     }
 };
 
