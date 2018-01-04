@@ -26,9 +26,11 @@ var getMillis = {
 };
 
 var jitploy = {
+    DEFAULT_SERVER: 'https://jitploy.herokuapp.com/',          // Defaults to sass server, you can run your own if you like
     io: require('socket.io-client'),                           // to connect to our jitploy intergration server
     client: null,
-    init: function(server, token, repoName){
+    init: function(token, repoName, server){
+        if(!server){server = jitploy.DEFAULT_SERVER;}
         jitploy.client = jitploy.io(server);                   // jitploy socket server connection initiation
         jitploy.client.on('connect', function authenticate(){  // connect with orcastrator
             jitploy.client.emit('authenticate', {              // NOTE assumes TLS is in place otherwise this is useless
@@ -39,13 +41,13 @@ var jitploy = {
         });
         var timeToSleep = getMillis.toOffHours(CD_HOURS_START, CD_HOURS_END);
         setTimeout(function(){
-            jitploy.takeABreak(server, token, repoName);
+            jitploy.takeABreak(token, repoName, server);
         }, timeToSleep);
     },
-    takeABreak: function(server, token, repoName){
+    takeABreak: function(token, repoName, server){
         jitploy.client.close();                               // stop bothering the server you'll keep it awake
         setTimeout(function startAgain(){                     // initialize the connection to deployment again tomorrow
-            jitploy.init(server, token, repoName);
+            jitploy.init(token, repoName, server);
         }, getMillis.toTimeTomorrow(CD_HOURS_START));         // get millis to desired time tomorrow
     }
 };
@@ -124,13 +126,12 @@ var run = {
 
 var cmd = {
     run: function(service, options){
-        if(options.server && options.token && options.repo){
-        } else {
+        if(!options.token && !options.repo){                                          // given required options are missing
             console.log('sorry youll need to put in flags as if they were required config vars');
             return;
         }
-        var servicePath = path.resolve(path.dirname(service));                       // path of file that is passed
-        jitploy.init(options.server, options.token, options.repo);
+        var servicePath = path.resolve(path.dirname(service));                        // path of file that is passed
+        jitploy.init(options.token, options.repo, options.server);                    // start up socket client
         cmd.checkConfig(servicePath, function hasConfig(configOrNoConfig){
             if(options.pm2){                                                          // given pm2 flag is passed
                 run.initCD(servicePath, configOrNoConfig, options.key, options.repo); // repo name should equate what service is named in pm2
