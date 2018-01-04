@@ -73,7 +73,7 @@ var config = {
 var run = {
     child: require('child_process'),
     config: { has: false },          // default to false in case no can has config deploys assuming static config
-    pm2service: false,
+    pm2: false,                      // not whether service process is being managed my pm2 or this service
     servicePath: false,
     PATH: process.env.PATH,
     cmd: function(command, cmdName, onSuccess, onFail){
@@ -88,9 +88,9 @@ var run = {
         });
         run[cmdName].on('error', function(error){console.log('child exec error: ' + error);});
     },
-    initCD: function(servicePath, hasConfig, configKey, pm2service){ // runs either on start up or every time jitploy server pings
+    initCD: function(servicePath, hasConfig, configKey, pm2){ // runs either on start up or every time jitploy server pings
         if(servicePath){run.servicePath = servicePath;}
-        if(pm2service){run.pm2service = pm2service;}
+        if(pm2){run.pm2 = true;}
         run.cmd('git pull', 'gitPull', function pullSuccess(){ // pull new code
             if(run.config.has){                                // has config already been stored: deploy cases
                 config.run(run.config.key, run.install);       // decrypt configuration then install
@@ -105,7 +105,7 @@ var run = {
     },
     install: function(){ // and probably restart when done
         run.cmd('npm install', 'npmInstall', function installSuccess(){
-            if(run.pm2service){                  // in case pm2 is managing service let it do restart. Make sure watch flag is set
+            if(run.pm2){                         // in case pm2 is managing service let it do restart. Make sure watch flag is set
             } else {                             // otherwise this process is managing service
                 if(run.service){
                     run.service.kill('SIGINT');  // send kill signal to current process then start it again
@@ -133,11 +133,7 @@ var cmd = {
         var servicePath = path.resolve(path.dirname(service));                        // path of file that is passed
         jitploy.init(options.token, options.repo, options.server);                    // start up socket client
         cmd.checkConfig(servicePath, function hasConfig(configOrNoConfig){
-            if(options.pm2){                                                          // given pm2 flag is passed
-                run.initCD(servicePath, configOrNoConfig, options.key, options.repo); // repo name should equate what service is named in pm2
-            } else {
-                run.initCD(servicePath, configOrNoConfig, options.key);               // given a file was passed assume this client is managing executible
-            }
+            run.initCD(servicePath, configOrNoConfig, options.key, options.pm2);
         });
     },
     checkConfig: function(servicePath, hasConfig){
