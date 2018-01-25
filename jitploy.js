@@ -102,7 +102,7 @@ var run = {
         else if(eco){                                          // can only use ether ecosystem or pm2 not both, only need to set on startup
             var ecoConfig = require(run.servicePath);          // import config module, that one would otherwise use for pm2
             run.startCMD = 'node ' + ecoConfig.apps[0].script; // config should have absolute path to service
-            config.option.env = ecoConfig.apps[0].env;         // In this config is loaded from this ecosystem file and can only change on restart
+            config.options.env = ecoConfig.apps[0].env;        // In this config is loaded from this ecosystem file and can only change on restart
         }
         run.cmd('git pull', 'gitPull', function pullSuccess(){ // pull new code
             if(run.config){                                    // has config already been stored: deploy cases
