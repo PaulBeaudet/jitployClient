@@ -101,7 +101,6 @@ var run = {
         if(pm2){run.pm2 = true;}
         if(eco){                                               // can only use ether ecosystem or pm2 not both, only need to set on startup
             var ecoConfig = require(run.servicePath + '/ecosystem.config.js'); // import config module, that one would otherwise use for pm2
-            console.log('here is a config -' + JSON.stringify(ecoConfig, null, 4));
             run.startCMD = 'node ' + ecoConfig.apps[0].script; // config should have absolute path to service
             config.options.env = ecoConfig.apps[0].env;        // In this config is loaded from this ecosystem file and can only change on restart
         }
