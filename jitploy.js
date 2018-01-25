@@ -97,13 +97,11 @@ var run = {
         run[cmdName].on('error', function(error){console.log('child exec error: ' + error);});
     },
     deploy: function(servicePath, configKey, pm2, eco){ // runs either on start up or every time jitploy server pings
-        console.log(eco);
-        console.log(pm2);
         if(servicePath){run.servicePath = servicePath;}
         if(pm2){run.pm2 = true;}
         else if(eco){                                          // can only use ether ecosystem or pm2 not both, only need to set on startup
             var ecoConfig = require(run.servicePath);          // import config module, that one would otherwise use for pm2
-            console.log(JSON.stringify(ecoConfig, null, 4));
+            console.log('here is a config -' + JSON.stringify(ecoConfig, null, 4));
             run.startCMD = 'node ' + ecoConfig.apps[0].script; // config should have absolute path to service
             config.options.env = ecoConfig.apps[0].env;        // In this config is loaded from this ecosystem file and can only change on restart
         }
