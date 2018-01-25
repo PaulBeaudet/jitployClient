@@ -82,6 +82,7 @@ var run = {
     config: false,                   // default to false in case no can has config deploys assuming static config
     pm2: false,                      // not whether service process is being managed my pm2 or this service
     servicePath: false,
+    startCMD: 'npm run start',       // default command for starting an application
     PATH: process.env.PATH,
     cmd: function(command, cmdName, onSuccess, onFail){
         command = 'cd ' + run.servicePath + ' && PATH=' + run.PATH + ' ' + command; // cwd makes sure we are in working directory that we originated from
@@ -95,9 +96,14 @@ var run = {
         });
         run[cmdName].on('error', function(error){console.log('child exec error: ' + error);});
     },
-    deploy: function(servicePath, configKey, pm2){ // runs either on start up or every time jitploy server pings
+    deploy: function(servicePath, configKey, pm2, eco){ // runs either on start up or every time jitploy server pings
         if(servicePath){run.servicePath = servicePath;}
         if(pm2){run.pm2 = true;}
+        else if(eco){                                          // can only use ether ecosystem or pm2 not both, only need to set on startup
+            var ecoConfig = require(run.servicePath);          // import config module, that one would otherwise use for pm2
+            run.startCMD = 'node ' + ecoConfig.apps[0].script; // config should have absolute path to service
+            config.option.env = ecoConfig.apps[0].env;         // In this config is loaded from this ecosystem file and can only change on restart
+        }
         run.cmd('git pull', 'gitPull', function pullSuccess(){ // pull new code
             if(run.config){                                    // has config already been stored: deploy cases
                 config.run(run.config.key, run.install);       // decrypt configuration then install
@@ -129,7 +135,7 @@ var run = {
     },
     start: function(code){
         console.log('restart event ' + code); // process automatically restarts in any case it stops
-        run.cmd('npm run start', 'service', run.start, run.start);
+        run.cmd(run.startCMD, 'service', run.start, run.start);
     }
 };
 
@@ -144,6 +150,7 @@ var cli = {
             .option('-r, --repo <repo>', 'repo name')
             .option('-s, --server <server>', 'jitploy server to connect to')
             .option('-p, --pm2 <pm2>', 'manage service with pm2')
+            .option('-e, --eco <eco>', 'manage service directly with ecosystem file')
             .action(cli.run);
 
         cli.program.parse(process.argv);
@@ -154,9 +161,9 @@ var cli = {
             console.log('missing required config vars');
             return;
         }
-        var servicePath = path.resolve(path.dirname(service));      // path of file that is passed
-        jitploy.init(options.token, options.repo, options.server);  // start up socket client
-        run.deploy(servicePath, options.key, options.pm2);          // runs deployment steps
+        var servicePath = path.resolve(path.dirname(service));          // path of file that is passed
+        jitploy.init(options.token, options.repo, options.server);      // start up socket client
+        run.deploy(servicePath, options.key, options.pm2, options.eco); // runs deployment steps
     }
 };
 
