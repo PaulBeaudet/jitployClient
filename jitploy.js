@@ -99,7 +99,7 @@ var run = {
     deploy: function(servicePath, configKey, pm2, eco){ // runs either on start up or every time jitploy server pings
         if(servicePath){run.servicePath = servicePath;}
         if(pm2){run.pm2 = true;}
-        else if(eco){                                          // can only use ether ecosystem or pm2 not both, only need to set on startup
+        if(eco){                                               // can only use ether ecosystem or pm2 not both, only need to set on startup
             var ecoConfig = require(run.servicePath);          // import config module, that one would otherwise use for pm2
             console.log('here is a config -' + JSON.stringify(ecoConfig, null, 4));
             run.startCMD = 'node ' + ecoConfig.apps[0].script; // config should have absolute path to service
