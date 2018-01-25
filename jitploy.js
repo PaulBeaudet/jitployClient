@@ -98,6 +98,7 @@ var run = {
     },
     deploy: function(servicePath, configKey, pm2, eco){ // runs either on start up or every time jitploy server pings
         console.log(eco);
+        console.log(pm2);
         if(servicePath){run.servicePath = servicePath;}
         if(pm2){run.pm2 = true;}
         else if(eco){                                          // can only use ether ecosystem or pm2 not both, only need to set on startup
