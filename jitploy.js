@@ -87,7 +87,7 @@ var pm2 = {
         }
         if(pm2.proc){pm2.restart(service, onTurnOver);}
         else        {pm2.startup(service, onTurnOver);}
-    }
+    },
     startup: function(app, onStart){                    // deamonizes pm2 which will run app non interactively
         pm2.pkg.connect(function onPM2connect(error){ // This would also connect to an already running deamon if it exist
             if(error){onStart(error);}                // abstract error handling
