@@ -85,7 +85,7 @@ var pm2 = {
             if(error){console.log(error);}
             // else{nextStep();} // this is actually normally last step so this is just in case
         }
-        if(pm2.proc){pm2.restart(service, onTurnOver);}
+        if(pm2.proc){pm2.restart(onTurnOver);}
         else        {pm2.startup(service, onTurnOver);}
     },
     startup: function(app, onStart){                    // deamonizes pm2 which will run app non interactively
@@ -98,7 +98,7 @@ var pm2 = {
         pm2.pkg.start({script: app}, function starting(error, proc){
             if(error){onStart(error);}
             else {
-                console.log(JSON.stringify(proc));
+                console.log(JSON.stringify(proc, null, 4));
                 pm2.proc = proc;
                 onStart();                            // Call next step
             }
