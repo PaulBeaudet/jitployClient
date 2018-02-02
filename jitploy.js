@@ -98,6 +98,7 @@ var pm2 = {
         pm2.pkg.start({script: app}, function starting(error, proc){
             if(error){onStart(error);}
             else {
+                console.log(JSON.stringify(proc));
                 pm2.proc = proc;
                 onStart();                            // Call next step
             }
@@ -206,9 +207,18 @@ var cli = {
             console.log('missing required config vars');
             return;
         }
+        // MAYBE, just deamonize process right here, pass original path and options as env vars
         jitploy.init(options.token, options.repo, options.server);  // start up socket client
         run.deploy(service, options);                               // runs deployment steps
     }
 };
 
-cli.setup();
+if(process.env.DEAMON){ // given program is being called as a pm2 deamon
+    // jitploy.init(process.env.TOKEN, process.env.REPO, process.env.SERVER);  // start up socket client
+    // run.service = process.env.SERVICE
+    // run.servicePath = path.resolve(path.dirname(process.env.SERVICE));
+    // run.PATH = process.env.ORIGIN_PATH
+    // run.PM2 = true
+} else {
+    cli.setup();
+}
