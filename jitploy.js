@@ -84,7 +84,7 @@ var pm2 = {
         function onTurnOver(error){
             if(error){console.log(error);}
             // else{nextStep();} // this is actually normally last step so this is just in case
-        });
+        }
         if(pm2.proc){pm2.restart(service, onTurnOver);}
         else        {pm2.startup(service, onTurnOver);}
     }
