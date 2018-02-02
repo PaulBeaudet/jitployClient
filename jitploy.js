@@ -77,6 +77,42 @@ var config = {
     }
 };
 
+var pm2 = {
+    pkg: require('pm2'),                              // Process management library 2
+    proc: null,                                       // process object to call
+    deploy: function(service, nextStep){              // what to do on deploy step
+        function onTurnOver(error){
+            if(error){console.log(error);}
+            // else{nextStep();} // this is actually normally last step so this is just in case
+        });
+        if(pm2.proc){pm2.restart(service, onTurnOver);}
+        else        {pm2.startup(service, onTurnOver);}
+    }
+    startup: function(app, onStart){                    // deamonizes pm2 which will run app non interactively
+        pm2.pkg.connect(function onPM2connect(error){ // This would also connect to an already running deamon if it exist
+            if(error){onStart(error);}                // abstract error handling
+            else     {pm2.initApp(app, onStart);}     // after connected with deamon start process in question
+        });
+    },
+    initApp: function(app, onStart){                  // intializes process we want to run
+        pm2.pkg.start({script: app}, function starting(error, proc){
+            if(error){onStart(error);}
+            else {
+                pm2.proc = proc;
+                onStart();                            // Call next step
+            }
+        });
+    },
+    restart: function(nextStep){
+        if(pm2.proc){                                 // given we have a process to call
+            pm2.pkg.restart(pm2.proc, function onRestart(error){
+                nextStep(error);
+                // TODO Do we need to add new proc information?
+            });
+        } else {nextStep('No process in memory');}
+    }
+}
+
 var run = {
     child: require('child_process'),
     config: false,                   // default to false in case no can has config deploys assuming static config
@@ -96,21 +132,29 @@ var run = {
         });
         run[cmdName].on('error', function(error){console.log('child exec error: ' + error);});
     },
-    deploy: function(servicePath, configKey, pm2, eco){ // runs either on start up or every time jitploy server pings
-        if(servicePath){run.servicePath = servicePath;}
-        if(pm2){run.pm2 = true;}
-        if(eco){                                               // can only use ether ecosystem or pm2 not both, only need to set on startup
-            var ecoConfig = require(run.servicePath + '/ecosystem.config.js'); // import config module, that one would otherwise use for pm2
-            run.startCMD = 'node ' + ecoConfig.apps[0].script; // config should have absolute path to service
-            config.options.env = ecoConfig.apps[0].env;        // In this config is loaded from this ecosystem file and can only change on restart
-        }
-        run.cmd('git pull', 'gitPull', function pullSuccess(){ // pull new code
-            if(run.config){                                    // has config already been stored: deploy cases
-                config.run(run.config.key, run.install);       // decrypt configuration then install
-            } else if (configKey){                             // we need a key if we ever want to decrypt a config
-                config.check(servicePath, function(hasConfig){ // first check if we have a config folder with things to decrypt at all
-                    if(hasConfig){                             // only try to do any of this with a config folder
-                        run.config = configKey;                // want to remember key so it can be passed each deploy
+    deploy: function(service, options){                                      // runs either on start up or every time jitploy server pings
+        if(service){
+            run.service = service;
+            run.servicePath = path.resolve(path.dirname(service));
+        }  // path of file that is passed
+        if(options){ // remember we get non-when server triggers deploy
+            if(options.pm2){run.pm2 = true;}  // TODO probably should blow away eco mode once pm2 api intergration is finished
+            if(options.eco){                                         // can only use ether ecosystem or pm2 not both, only need to set on startup
+                var ecoConfig = require(run.servicePath + '/ecosystem.config.js'); // import config module, that one would otherwise use for pm2
+                run.startCMD = 'node ' + ecoConfig.apps[0].script;   // config should have absolute path to service
+                config.options.env = ecoConfig.apps[0].env;          // In this config is loaded from this ecosystem file and can only change on restart
+            }
+            run.pull(options.configKey);
+        } else {run.pull();}                                     // we are just concerned with pulling when server ask for a deploy
+    },
+    pull: function(configKey){
+        run.cmd('git pull', 'gitPull', function pullSuccess(){   // pull new code
+            if(run.config){                                      // has config already been stored: deploy cases
+                config.run(run.config.key, run.install);         // decrypt configuration then install
+            } else if (configKey){                               // we need a key if we ever want to decrypt a config
+                config.check(run.servicePath, function(hasConfig){ // first check if we have a config folder with things to decrypt at all
+                    if(hasConfig){                               // only try to do any of this with a config folder
+                        run.config = configKey;                  // want to remember key so it can be passed each deploy
                         config.run(run.config.key, run.install); // decrypt configuration then install
                     }
                 });
@@ -122,7 +166,8 @@ var run = {
     install: function(){ // and probably restart when done
         run.cmd('npm install', 'npmInstall', function installSuccess(){
             if(run.pm2){                         // in case pm2 is managing service let it do restart. Make sure watch flag is set
-            } else {                             // otherwise this process is managing service
+                pm2.deploy(run.service);
+            } else {                             // otherwise this process is managing service # TODO given pm2 works deprecate this thing
                 if(run.service){
                     run.service.kill('SIGINT');  // send kill signal to current process then start it again
                 } else {
@@ -161,9 +206,8 @@ var cli = {
             console.log('missing required config vars');
             return;
         }
-        var servicePath = path.resolve(path.dirname(service));          // path of file that is passed
-        jitploy.init(options.token, options.repo, options.server);      // start up socket client
-        run.deploy(servicePath, options.key, options.pm2, options.eco); // runs deployment steps
+        jitploy.init(options.token, options.repo, options.server);  // start up socket client
+        run.deploy(service, options);                               // runs deployment steps
     }
 };
 
