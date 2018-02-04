@@ -85,7 +85,7 @@ var config = {
 };
 
 var pm2 = {
-    pkg: require('pm2'),                              // Process management library 2
+    pkg: require('pm2'),                              // Process management 2 library
     daemons: [],                                      // Array of daemons being managed by this application (Jitploy itself, apps its listening for)
     onTurnOver: function(error, proccessInfo){        // generic handler for errCallback, see pm2 API
         if(error){console.log(error);}
@@ -138,7 +138,6 @@ var run = {
             run.servicePath = path.resolve(path.dirname(service));
         }  // path of file that is passed
         if(options){ // remember we get non-when server triggers deploy
-            if(options.pm2){run.pm2 = true;}  // TODO probably should blow away eco mode once pm2 api intergration is finished
             if(options.eco){                                         // can only use ether ecosystem or pm2 not both, only need to set on startup
                 var ecoConfig = require(run.servicePath + '/ecosystem.config.js'); // import config module, that one would otherwise use for pm2
                 run.startCMD = 'node ' + ecoConfig.apps[0].script;   // config should have absolute path to service
@@ -165,22 +164,10 @@ var run = {
     },
     install: function(){ // and probably restart when done
         run.cmd('npm install', 'npmInstall', function installSuccess(){
-            if(run.pm2){                         // in case pm2 is managing service let it do restart. Make sure watch flag is set
-                pm2.deploy(run.service);
-            } else {                             // otherwise this process is managing service # TODO given pm2 works deprecate this thing
-                if(run.service){
-                    run.service.kill('SIGINT');  // send kill signal to current process then start it again
-                } else {
-                    run.start('starting up');    // given first start get recursive restart ball rolling
-                }
-            }
+            pm2.deploy(run.service); // once npm install is complete restart service
         }, function installFail(code){
             console.log('bad install? ' + code);
         });
-    },
-    start: function(code){
-        console.log('restart event ' + code); // process automatically restarts in any case it stops
-        run.cmd(run.startCMD, 'service', run.start, run.start);
     }
 };
 
@@ -194,7 +181,6 @@ var cli = {
             .option('-t, --token <token>', 'config token to use service')
             .option('-r, --repo <repo>', 'repo name')
             .option('-s, --server <server>', 'jitploy server to connect to')
-            .option('-p, --pm2 <pm2>', 'manage service with pm2')
             .option('-e, --eco <eco>', 'manage service directly with ecosystem file')
             .action(cli.run);
 
@@ -211,12 +197,11 @@ var cli = {
             token: options.token,
             repo: options.repo,
             server: options.server,
-            pm2: options.pm2,
             eco: options.eco
         };
         pm2.startup('jitploy', function onStart(error){               // call thy self as a pm2 deamon
             if(error){
-                console.log(error); // TODO figure out what message comes for no such command and npm install jitploy globally
+                console.log(error);
                 process.exit(1);    // ungraceful exit
             } else {process.exit(0);}
         }, [service, JSON.stringify(optionsToStringify), DAEMON_MODE]);  // args to pass jitploy deamon
