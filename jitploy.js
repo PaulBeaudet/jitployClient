@@ -3,7 +3,7 @@
 var path = require('path');
 var fs = require('fs');
 var CD_HOURS_START = 12;// 16;    // 5  pm UTC / 12 EST  // Defines hours when deployments can happen
-var CD_HOURS_END   = 17;// 21;    // 10 pm UTC /  5 EST  // TODO Create an option to change default
+var CD_HOURS_END   = 18;// 21;    // 10 pm UTC /  5 EST  // TODO Create an option to change default
 var DAEMON_MODE = 'deamon_mode';
 var SERVICE = 2; // Order arguments are taken in deamon mode
 var OPTIONS = 3;
@@ -90,22 +90,23 @@ var pm2 = {
     onTurnOver: function(error, proccessInfo){        // generic handler for errCallback, see pm2 API
         if(error){console.log(error);}
     },
-    deploy: function(service, repo){                  // what to do on deploy step
-        var existingProc = false;                     // only mark to restart proc if it exist
+    deploy: function(service){                        // what to do on deploy step
         for(var proc = 0; proc < pm2.daemons.length; proc++){
-            if(pm2.daemons[proc] === repo){existingProc = true;}
+            if(pm2.daemons[proc] === service){
+                pm2.pkg.restart(service, pm2.onTurnOver);
+                return true;                         // exit function when we have found what we are looking for
+            }
         }
-        if(existingProc){pm2.pkg.restart(repo, pm2.onTurnOver);}
-        else            {pm2.startup(service, repo, pm2.onTurnOver);}
+        pm2.startup(service, pm2.onTurnOver);  // given function has yet to exit
     },
-    startup: function(app, repo, onStart, args){             // deamonizes pm2 which will run app non interactively
+    startup: function(service, onStart, args){             // deamonizes pm2 which will run app non interactively
         pm2.pkg.connect(function onPM2connect(error){        // This would also connect to an already running deamon if it exist
             if(error){onStart(error);}                       // abstract error handling
             else {
                 if(!args){args = [];}                        // given no arguments pass no arguments
-                pm2.pkg.start({script: app, args: args, logDateFormat:"YYYY-MM-DD HH:mm Z", name: repo}, function initStart(error, proc){
-                    pm2.daemons.push(repo);                  // add this name to our list of running daemons
-                    onStart(error);
+                pm2.pkg.start({script: service, args: args, logDateFormat:"YYYY-MM-DD HH:mm Z"}, function initStart(err, proc){
+                    pm2.daemons.push(service);               // add this name to our list of running daemons
+                    onStart(err);
                 });
             } // after connected with deamon start process in question
         });
@@ -137,7 +138,6 @@ var run = {
             run.servicePath = path.resolve(path.dirname(service));
         }  // path of file that is passed
         if(options){ // remember we get non-when server triggers deploy
-            run.repo = options.repo;          // Repo is required
             if(options.pm2){run.pm2 = true;}  // TODO probably should blow away eco mode once pm2 api intergration is finished
             if(options.eco){                                         // can only use ether ecosystem or pm2 not both, only need to set on startup
                 var ecoConfig = require(run.servicePath + '/ecosystem.config.js'); // import config module, that one would otherwise use for pm2
@@ -166,7 +166,7 @@ var run = {
     install: function(){ // and probably restart when done
         run.cmd('npm install', 'npmInstall', function installSuccess(){
             if(run.pm2){                         // in case pm2 is managing service let it do restart. Make sure watch flag is set
-                pm2.deploy(run.service, run.repo);
+                pm2.deploy(run.service);
             } else {                             // otherwise this process is managing service # TODO given pm2 works deprecate this thing
                 if(run.service){
                     run.service.kill('SIGINT');  // send kill signal to current process then start it again
@@ -214,9 +214,9 @@ var cli = {
             pm2: options.pm2,
             eco: options.eco
         };
-        pm2.startup('jitploy', 'jitploy', function onStart(error){               // call thy self as a pm2 deamon
+        pm2.startup('jitploy', function onStart(error){               // call thy self as a pm2 deamon
             if(error){
-                console.log(error);
+                console.log(error); // TODO figure out what message comes for no such command and npm install jitploy globally
                 process.exit(1);    // ungraceful exit
             } else {process.exit(0);}
         }, [service, JSON.stringify(optionsToStringify), DAEMON_MODE]);  // args to pass jitploy deamon
