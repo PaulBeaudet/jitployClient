@@ -2,8 +2,12 @@
 // jitploy.js ~ CLIENT ~ Copyright 2017 ~ Paul Beaudet MIT License
 var path = require('path');
 var fs = require('fs');
-var CD_HOURS_START = 16;    // 5  pm UTC / 12 EST  // Defines hours when deployments can happen
-var CD_HOURS_END   = 21;    // 10 pm UTC /  5 EST  // TODO Create an option to change default
+var CD_HOURS_START = 12;// 16;    // 5  pm UTC / 12 EST  // Defines hours when deployments can happen
+var CD_HOURS_END   = 17;// 21;    // 10 pm UTC /  5 EST  // TODO Create an option to change default
+var DAEMON_MODE = 'deamon_mode';
+var SERVICE = 2; // Order arguments are taken in deamon mode
+var OPTIONS = 3;
+var DAEMON  = 4;
 
 var getMillis = {
     toTimeTomorrow: function(hour){                     // millitary hour minus one
@@ -26,28 +30,31 @@ var getMillis = {
 };
 
 var jitploy = {
-    DEFAULT_SERVER: 'https://jitploy.herokuapp.com/',          // Defaults to sass server, you can run your own if you like
+    SERVER: 'https://jitploy.herokuapp.com/',                  // Defaults to sass server, you can run your own if you like
     io: require('socket.io-client'),                           // to connect to our jitploy intergration server
     client: null,
-    init: function(token, repoName, server){
-        if(!server){server = jitploy.DEFAULT_SERVER;}
-        jitploy.client = jitploy.io(server);                   // jitploy socket server connection initiation
-        jitploy.client.on('connect', function authenticate(){  // connect with orcastrator
-            jitploy.client.emit('authenticate', {              // NOTE assumes TLS is in place otherwise this is useless
-                token: token,
-                name: repoName,
-            });                                                // its important lisner know that we are for real
-            jitploy.client.on('deploy', run.deploy);           // respond to deploy events
-        });
-        var timeToSleep = getMillis.toOffHours(CD_HOURS_START, CD_HOURS_END);
-        setTimeout(function(){
-            jitploy.takeABreak(token, repoName, server);
-        }, timeToSleep);
+    init: function(options){
+        if(options && options.token && options.repo){
+            if(options.server){jitploy.SERVER = options.server;}
+            jitploy.client = jitploy.io(jitploy.SERVER);           // jitploy socket server connection initiation
+            jitploy.client.on('connect', function authenticate(){  // connect with orcastrator
+                jitploy.client.emit('authenticate', {              // NOTE assumes TLS is in place otherwise this is useless
+                    token: options.token,
+                    name: options.repo,
+                });                                                // its important lisner know that we are for real
+                jitploy.client.on('deploy', run.deploy);           // respond to deploy events
+            });
+            setTimeout(function(){
+                jitploy.takeABreak(options.token, options.repo);
+            }, getMillis.toOffHours(CD_HOURS_START, CD_HOURS_END));
+        } else {console.log('Configuration issues');}              // maybe process should end itself if this is true
     },
-    takeABreak: function(token, repoName, server){
+    takeABreak: function(token, repo){
+        console.log('Taking a break from continueous deployment');
         jitploy.client.close();                               // stop bothering the server you'll keep it awake
         setTimeout(function startAgain(){                     // initialize the connection to deployment again tomorrow
-            jitploy.init(token, repoName, server);
+            console.log('Starting continueous deployment connection back up');
+            jitploy.init({token:token, repo:repo});
         }, getMillis.toTimeTomorrow(CD_HOURS_START));         // get millis to desired time tomorrow
     }
 };
@@ -80,35 +87,35 @@ var config = {
 var pm2 = {
     pkg: require('pm2'),                              // Process management library 2
     proc: null,                                       // process object to call
-    deploy: function(service, nextStep){              // what to do on deploy step
+    deploy: function(service, repo){                  // what to do on deploy step
         function onTurnOver(error){
             if(error){console.log(error);}
-            // else{nextStep();} // this is actually normally last step so this is just in case
         }
-        if(pm2.proc){pm2.restart(onTurnOver);}
-        else        {pm2.startup(service, onTurnOver);}
+        if(pm2.proc){pm2.restart(onTurnOver, repo);}
+        else        {pm2.startup(service, onTurnOver, repo);}
     },
-    startup: function(app, onStart){                    // deamonizes pm2 which will run app non interactively
-        pm2.pkg.connect(function onPM2connect(error){ // This would also connect to an already running deamon if it exist
-            if(error){onStart(error);}                // abstract error handling
-            else     {pm2.initApp(app, onStart);}     // after connected with deamon start process in question
+    startup: function(app, onStart, name, args){             // deamonizes pm2 which will run app non interactively
+        pm2.pkg.connect(function onPM2connect(error){        // This would also connect to an already running deamon if it exist
+            if(error){onStart(error);}                       // abstract error handling
+            else     {pm2.initApp(app, onStart, name, args);}// after connected with deamon start process in question
         });
     },
-    initApp: function(app, onStart){                  // intializes process we want to run
-        pm2.pkg.start({script: app}, function starting(error, proc){
+    initApp: function(app, onStart, name, args){       // intializes process we want to run
+        if(!args){args = [];}                          // given no arguments pass no arguments
+        pm2.pkg.start({script: app, args: args, logDateFormat:"YYYY-MM-DD HH:mm Z", name: name}, function starting(error, proc){
             if(error){onStart(error);}
             else {
-                console.log(JSON.stringify(proc, null, 4));
+                // console.log(JSON.stringify(proc, null, 4));
+                console.log('Number of processes: ' + proc.length);
                 pm2.proc = proc;
                 onStart();                            // Call next step
             }
         });
     },
-    restart: function(nextStep){
+    restart: function(nextStep, name){
         if(pm2.proc){                                 // given we have a process to call
-            pm2.pkg.restart(pm2.proc, function onRestart(error){
+            pm2.pkg.restart(name, function onRestart(error){
                 nextStep(error);
-                // TODO Do we need to add new proc information?
             });
         } else {nextStep('No process in memory');}
     }
@@ -139,6 +146,7 @@ var run = {
             run.servicePath = path.resolve(path.dirname(service));
         }  // path of file that is passed
         if(options){ // remember we get non-when server triggers deploy
+            run.repo = options.repo;          // Repo is required
             if(options.pm2){run.pm2 = true;}  // TODO probably should blow away eco mode once pm2 api intergration is finished
             if(options.eco){                                         // can only use ether ecosystem or pm2 not both, only need to set on startup
                 var ecoConfig = require(run.servicePath + '/ecosystem.config.js'); // import config module, that one would otherwise use for pm2
@@ -167,7 +175,7 @@ var run = {
     install: function(){ // and probably restart when done
         run.cmd('npm install', 'npmInstall', function installSuccess(){
             if(run.pm2){                         // in case pm2 is managing service let it do restart. Make sure watch flag is set
-                pm2.deploy(run.service);
+                pm2.deploy(run.service, run.repo);
             } else {                             // otherwise this process is managing service # TODO given pm2 works deprecate this thing
                 if(run.service){
                     run.service.kill('SIGINT');  // send kill signal to current process then start it again
@@ -205,20 +213,29 @@ var cli = {
     run: function(service, options){
         if(!options.token && !options.repo){                        // given required options are missing
             console.log('missing required config vars');
-            return;
+            process.exit(1);
         }
-        // MAYBE, just deamonize process right here, pass original path and options as env vars
-        jitploy.init(options.token, options.repo, options.server);  // start up socket client
-        run.deploy(service, options);                               // runs deployment steps
+        var optionsToStringify = {
+            key: options.key,
+            token: options.token,
+            repo: options.repo,
+            server: options.server,
+            pm2: options.pm2,
+            eco: options.eco
+        };
+        pm2.startup('jitploy', function onStart(error){               // call thy self as a pm2 deamon
+            if(error){
+                console.log(error);
+                process.exit(1);    // ungraceful exit
+            } else {process.exit(0);}
+        }, 'jitploy', [service, JSON.stringify(optionsToStringify), DAEMON_MODE]);  // args to pass jitploy deamon
     }
 };
 
-if(process.env.DEAMON){ // given program is being called as a pm2 deamon
-    // jitploy.init(process.env.TOKEN, process.env.REPO, process.env.SERVER);  // start up socket client
-    // run.service = process.env.SERVICE
-    // run.servicePath = path.resolve(path.dirname(process.env.SERVICE));
-    // run.PATH = process.env.ORIGIN_PATH
-    // run.PM2 = true
+if(process.argv[DAEMON] === DAEMON_MODE){            // given program is being called as a pm2 deamon
+    var options = JSON.parse(process.argv[OPTIONS]); // turn string back into an object
+    jitploy.init(options);                           // start up socket client
+    run.deploy(process.argv[SERVICE], options);      // runs deployment steps
 } else {
     cli.setup();
 }
