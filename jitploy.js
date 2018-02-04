@@ -86,38 +86,29 @@ var config = {
 
 var pm2 = {
     pkg: require('pm2'),                              // Process management library 2
-    proc: null,                                       // process object to call
-    deploy: function(service, repo){                  // what to do on deploy step
-        function onTurnOver(error){
-            if(error){console.log(error);}
-        }
-        if(pm2.proc){pm2.restart(onTurnOver, repo);}
-        else        {pm2.startup(service, onTurnOver, repo);}
+    daemons: [],                                      // Array of daemons being managed by this application (Jitploy itself, apps its listening for)
+    onTurnOver: function(error, proccessInfo){        // generic handler for errCallback, see pm2 API
+        if(error){console.log(error);}
     },
-    startup: function(app, onStart, name, args){             // deamonizes pm2 which will run app non interactively
+    deploy: function(service, repo){                  // what to do on deploy step
+        var existingProc = false;                     // only mark to restart proc if it exist
+        for(var proc = 0; proc < pm2.daemons.length; proc++){
+            if(pm2.daemons[proc] === repo){existingProc = true;}
+        }
+        if(existingProc){pm2.pkg.restart(repo, pm2.onTurnOver);}
+        else            {pm2.startup(service, repo, pm2.onTurnOver);}
+    },
+    startup: function(app, repo, onStart, args){             // deamonizes pm2 which will run app non interactively
         pm2.pkg.connect(function onPM2connect(error){        // This would also connect to an already running deamon if it exist
             if(error){onStart(error);}                       // abstract error handling
-            else     {pm2.initApp(app, onStart, name, args);}// after connected with deamon start process in question
-        });
-    },
-    initApp: function(app, onStart, name, args){       // intializes process we want to run
-        if(!args){args = [];}                          // given no arguments pass no arguments
-        pm2.pkg.start({script: app, args: args, logDateFormat:"YYYY-MM-DD HH:mm Z", name: name}, function starting(error, proc){
-            if(error){onStart(error);}
             else {
-                // console.log(JSON.stringify(proc, null, 4));
-                console.log('Number of processes: ' + proc.length);
-                pm2.proc = proc;
-                onStart();                            // Call next step
-            }
+                if(!args){args = [];}                        // given no arguments pass no arguments
+                pm2.pkg.start({script: app, args: args, logDateFormat:"YYYY-MM-DD HH:mm Z", name: repo}, function initStart(error, proc){
+                    pm2.daemons.push(repo);                  // add this name to our list of running daemons
+                    onStart(error);
+                });
+            } // after connected with deamon start process in question
         });
-    },
-    restart: function(nextStep, name){
-        if(pm2.proc){                                 // given we have a process to call
-            pm2.pkg.restart(name, function onRestart(error){
-                nextStep(error);
-            });
-        } else {nextStep('No process in memory');}
     }
 }
 
@@ -223,12 +214,12 @@ var cli = {
             pm2: options.pm2,
             eco: options.eco
         };
-        pm2.startup('jitploy', function onStart(error){               // call thy self as a pm2 deamon
+        pm2.startup('jitploy', 'jitploy', function onStart(error){               // call thy self as a pm2 deamon
             if(error){
                 console.log(error);
                 process.exit(1);    // ungraceful exit
             } else {process.exit(0);}
-        }, 'jitploy', [service, JSON.stringify(optionsToStringify), DAEMON_MODE]);  // args to pass jitploy deamon
+        }, [service, JSON.stringify(optionsToStringify), DAEMON_MODE]);  // args to pass jitploy deamon
     }
 };
 
