@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // jitploy.js ~ CLIENT ~ Copyright 2017 ~ Paul Beaudet MIT License
+"use strict";
 var path = require('path');
 var fs = require('fs');
 var CD_HOURS_START = 12;// 16;    // 5  pm UTC / 12 EST  // Defines hours when deployments can happen
@@ -40,7 +41,7 @@ var jitploy = {
             jitploy.client.on('connect', function authenticate(){  // connect with orcastrator
                 jitploy.client.emit('authenticate', {              // NOTE assumes TLS is in place otherwise this is useless
                     token: options.token,
-                    name: options.repo,
+                    name: options.repo
                 });                                                // its important lisner know that we are for real
                 jitploy.client.on('deploy', run.deploy);           // respond to deploy events
             });
@@ -65,13 +66,13 @@ var config = {
     options: {
         env: {}
     }, // ultimately config vars are stored here and past to program being tracked
-    run: function(configKey, onFinsh){
-        var readFile = fs.createReadStream(cmd.path + '/config/encrypted_' + config.env);
+    run: function(configKey, cwd, onFinsh){
+        var readFile = fs.createReadStream(cwd + '/config/encrypted_' + config.env);
         var decrypt = config.crypto.createDecipher('aes-256-ctr',  configKey);
-        var writeFile = fs.createWriteStream(cmd.path + '/config/decrypted_' + config.env + '.js');
+        var writeFile = fs.createWriteStream(cwd + '/config/decrypted_' + config.env + '.js');
         readFile.pipe(decrypt).pipe(writeFile);
         writeFile.on('finish', function(){
-            config.options.env = require(cmd.path + '/config/decrypted_' + config.env + '.js');
+            config.options.env = require(cwd + '/config/decrypted_' + config.env + '.js');
             onFinsh(); // call next thing to do, prabably npm install // TODO probably should be passing environment vars
         });
     },
@@ -111,7 +112,7 @@ var pm2 = {
             } // after connected with deamon start process in question
         });
     }
-}
+};
 
 var run = {
     child: require('child_process'),
@@ -154,7 +155,7 @@ var run = {
                 config.check(run.servicePath, function(hasConfig){ // first check if we have a config folder with things to decrypt at all
                     if(hasConfig){                               // only try to do any of this with a config folder
                         run.config = configKey;                  // want to remember key so it can be passed each deploy
-                        config.run(run.config.key, run.install); // decrypt configuration then install
+                        config.run(run.config.key, run.servicePath, run.install); // decrypt configuration then install
                     }
                 });
             } else {                                           // otherwise assume config is static on server
