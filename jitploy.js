@@ -176,14 +176,23 @@ var cli = {
     program: require('commander'),
     setup: function(){
         cli.program
-            .version(require('./package.json').version) // grabs currently published version
-            .usage('[options] <file ...>')              // as far as I understand this is just for the help dialog
+            .version(require('./package.json').version); // grabs currently published version
+        cli.program
+            .usage('[options] <file ...>')               // as far as I understand this is just for the help dialog
             .option('-k, --key <key>', 'key to unlock service config')
             .option('-t, --token <token>', 'config token to use service')
             .option('-r, --repo <repo>', 'repo name')
             .option('-s, --server <server>', 'jitploy server to connect to')
             .option('-e, --eco <eco>', 'manage service directly with ecosystem file')
             .action(cli.run);
+        cli.program
+            .command('configlock')
+            .description('locks up configuration ')
+            .alias('lock')
+            .action(function test(){
+                console.log('pretending to lock configuration');
+            });
+
 
         cli.program.parse(process.argv);
         if(cli.program.args.length === 0){cli.program.help();}
