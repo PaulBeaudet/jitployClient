@@ -6,9 +6,6 @@ var fs = require('fs');
 var CD_HOURS_START = 12;// 16;    // 5  pm UTC / 12 EST  // Defines hours when deployments can happen
 var CD_HOURS_END   = 18;// 21;    // 10 pm UTC /  5 EST  // TODO Create an option to change default
 var DAEMON_MODE = 'deamon_mode';
-var SERVICE = 2; // Order arguments are taken in deamon mode
-var OPTIONS = 3;
-var DAEMON  = 4;
 var CONFIG_FOLDER = '/jitploy';
 var ALGORITHM = 'aes-128-cbc';
 
@@ -143,7 +140,7 @@ var pm2 = {
     onTurnOver: function(error, proccessInfo){        // generic handler for errCallback, see pm2 API
         if(error){console.log(error);}
     },
-    deploy: function(service){                        // what to do on deploy step
+    deploy: function(service, env){                   // what to do on deploy step
         // TODO make sure that you grab decrypted configuration in some way
         for(var proc = 0; proc < pm2.daemons.length; proc++){
             if(pm2.daemons[proc] === service){
@@ -151,14 +148,14 @@ var pm2 = {
                 return true;                         // exit function when we have found what we are looking for
             }
         }
-        pm2.startup(service, pm2.onTurnOver);  // given function has yet to exit
+        pm2.startup(service, env, pm2.onTurnOver);  // given function has yet to exit
     },
-    startup: function(service, onStart, args){             // deamonizes pm2 which will run app non interactively
+    startup: function(service, env, onStart){                // deamonizes pm2 which will run app non interactively
         pm2.pkg.connect(function onPM2connect(error){        // This would also connect to an already running deamon if it exist
             if(error){onStart(error);}                       // abstract error handling
             else {
-                if(!args){args = [];}                        // given no arguments pass no arguments
-                pm2.pkg.start({script: service, args: args, logDateFormat:"YYYY-MM-DD HH:mm Z"}, function initStart(err, proc){
+                if(!env){env = {};}                        // given no arguments pass no arguments
+                pm2.pkg.start({script: service, env: env, logDateFormat:"YYYY-MM-DD HH:mm Z"}, function initStart(err, proc){
                     pm2.daemons.push(service);               // add this name to our list of running daemons
                     onStart(err);
                 });
@@ -185,11 +182,11 @@ var run = {
         });
         run[cmdName].on('error', function(error){console.log('child exec error: ' + error);});
     },
-    deploy: function(service, options){                            // runs either on start up or every time jitploy server pings
-        if(service && options){                                    // given this is being called from cli
+    deploy: function(service, configKey){                          // runs either on start up or every time jitploy server pings
+        if(service){                                               // given this is being called from cli
             run.service = service;
             run.servicePath = path.resolve(path.dirname(service)); // path of file that is passed
-            if(options.configKey){ run.config = options.configKey;}// Set config key, if we have something to decrypt
+            if(configKey){run.config = configKey;}                 // Set config key, if we have something to decrypt and something to do it with
         }
         run.pull();  // remember we get nothing when server triggers deploy
     },
@@ -200,8 +197,7 @@ var run = {
     },
     install: function(configVars){ //  npm install step, reflect package.json changes and probably restart when done
         run.cmd('npm install', 'npmInstall', function installSuccess(){
-            // TODO pass configuration variables
-            pm2.deploy(run.service); // once npm install is complete restart service
+            pm2.deploy(run.service, configVars); // once npm install is complete restart service
         }, function installFail(code){
             console.log('bad install? ' + code);
         });
@@ -219,7 +215,6 @@ var cli = {
             .option('-t, --token <token>', 'config token to use service')
             .option('-r, --repo <repo>', 'repo name')
             .option('-s, --server <server>', 'jitploy server to connect to')
-            .option('-e, --eco <eco>', 'manage service directly with ecosystem file')
             .action(cli.run);
         cli.program
             .command('configlock')
@@ -244,26 +239,32 @@ var cli = {
             console.log('missing required config vars');
             process.exit(1);
         }
-        var optionsToStringify = {
+        pm2.startup(process.argv[1], {  // Env vars to pass jitploy deamon
             key: options.key,
             token: options.token,
             repo: options.repo,
             server: options.server,
-            eco: options.eco
-        };
-        pm2.startup(process.argv[1], function onStart(error){               // call thy self as a pm2 deamon
+            SERVICE: service,
+            DAEMON: DAEMON_MODE
+        }, function onStart(error){              // call thy self as a pm2 deamon
             if(error){
                 console.log(error);
-                process.exit(1);    // ungraceful exit
-            } else {process.exit(0);}
-        }, [service, JSON.stringify(optionsToStringify), DAEMON_MODE]);  // args to pass jitploy deamon
+                process.exit(1);                 // ungraceful exit
+            } else {
+                console.log('aye aye, captain'); // Probably should log out pm2 status when this is done
+                process.exit(0);
+            }
+        });
     }
 };
 
-if(process.argv[DAEMON] === DAEMON_MODE){            // given program is being called as a pm2 deamon
-    var options = JSON.parse(process.argv[OPTIONS]); // turn string back into an object
-    jitploy.init(options);                           // start up socket client
-    run.deploy(process.argv[SERVICE], options);      // runs deployment steps
+if(process.env.DAEMON === DAEMON_MODE){              // given program is being called as a pm2 deamon
+    jitploy.init({
+        token: process.env.token,
+        repo: process.env.repo,
+        server: process.env.server
+    }); // start up socket client
+    run.deploy(process.env.SERVICE, process.env.key); // runs deployment steps
 } else {
     cli.setup();
 }
