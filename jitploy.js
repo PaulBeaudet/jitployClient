@@ -63,37 +63,37 @@ var jitploy = {
 };
 
 var config = {
-    env: 'local', // process.env.ENVIRONMENT, // hard coding to local for now TODO make this configurable
+    env: 'local', // hard coding to local for now TODO make this configurable
     crypto: require('crypto'),
-    options: {
-        env: {}
-    }, // ultimately config vars are stored here and past to program being tracked
-    run: function(configKey, iv, cwd, onFinsh){ // TODO add IV to everything else
-        var readFile = fs.createReadStream(cwd + CONFIG_FOLDER + '/encrypted_' + config.env);
-        var decrypt = config.crypto.createDecipheriv(ALGORITHM,  new Buffer(configKey, 'base64'), new Buffer(iv, 'base64'));
-        var writeFile = fs.createWriteStream(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.js');
-        readFile.pipe(decrypt).pipe(writeFile);
-        writeFile.on('finish', function(){
-            config.options.env = require(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.js');
-            onFinsh(); // call next thing to do, prabably npm install // TODO probably should be passing environment vars
-        });
-    },
-    check: function(servicePath, hasConfig){ // checks if config exist
-        fs.stat(servicePath + CONFIG_FOLDER, function checkConfig(error, stats){
-            if(error)                            {console.log('on checking config folder: ' + error);}
-            else if(stats && stats.isDirectory()){hasConfig(true);}
-            else                                 {hasConfig(false);}
-        });
+    decrypt: function(configKey, cwd, onFinish){
+        if(configKey){ // important part of decrypting something
+            fs.stat(cwd + CONFIG_FOLDER + '/encrypted_' + config.env, function onFileCheck(error, stats){
+                if(error){
+                    console.log(error);
+                    onFinish(false);
+                } else if(stats.isFile()){ // if this file exist we have something to read from and a folder to write into
+                    var readFile = fs.createReadStream(cwd + CONFIG_FOLDER + '/encrypted_' + config.env);
+                    var sharedKey = configKey.substr(0, configKey.length/2);
+                    var iv = configKey.substr(configKey.length/2, configKey.length);
+                    var decrypt = config.crypto.createDecipheriv(ALGORITHM,  new Buffer(sharedKey, 'base64'), new Buffer(iv, 'base64'));
+                    var writeFile = fs.createWriteStream(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.js');
+                    readFile.pipe(decrypt).pipe(writeFile);
+                    writeFile.on('finish', function(){
+                        onFinish(require(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.js')); // pass env vars and call next thing to do
+                    });
+                } else {onFinish(false);}
+            });
+        } else {onFinish(false);}
     },
     lock: function(dir, options){   // Polymorphic, creates template or encrypts potential changes and additions
-        var env = 'local'; // default value for evinviornment
+        var env = config.env;        // default value for evnviornment
         if(options && options.env){env = options.env;}
         var servicePath = path.resolve(path.dirname(dir));
         fs.mkdir(servicePath + CONFIG_FOLDER, function(error){
             if(error){
                 if(error.code === 'EEXIST'){config.template(servicePath, env);} // Internet said this was a bad idea
                 else {console.log('Error on making directory: ' + error);}
-            } else {config.template(servicePath);}
+            } else {config.template(servicePath, env);}
         });
     },
     template: function(servicePath, env){
@@ -102,24 +102,25 @@ var config = {
             if(error){
                 if(error.code === 'EEXIST'){                             // In case where decrypted file exist
                     var existing = require(configFile);                  // read shared secret and initialization vector
-                    if(existing.JITPLOY_SHARED_KEY && existing.JITPLOY_IV){
-                        config.encrypt(servicePath, env, existing.JITPLOY_SHARED_KEY, existing.JITPLOY_IV);
+                    if(existing.JITPLOY_SHARED_KEY){
+                        var sharedKey = existing.JITPLOY_SHARED_KEY.substr(0, existing.JITPLOY_SHARED_KEY.length/2);
+                        var iv = existing.JITPLOY_SHARED_KEY.substr(existing.JITPLOY_SHARED_KEY.length/2, existing.JITPLOY_SHARED_KEY.length);
+                        config.encrypt(servicePath, env, sharedKey, iv);
                     } else {console.log('shared key is missing, not sure what to do');}
                 } else { console.log('on checking for config file: ' + error);}
             } else {
                 var sharedSecret = config.crypto.randomBytes(16).toString('base64');
                 var initializationVector = config.crypto.randomBytes(16).toString('base64');
                 fs.writeFile(fileData,
+                    '// Add properties to this module in order set configuration for ' + env + ' environment\n' +
                     'module.exports = {\n' +
-                    '    JITPLOY_SHARED_KEY: \'' + sharedSecret + '\',\n' +
-                    '    JITPLOY_IV: \'' + initializationVector + '\'\n' +
+                    '    JITPLOY_SHARED_KEY: \'' + sharedSecret + initializationVector + '\' // Shared key for remote target enviroment, encrypts this file\n' +
                     '};\n',
                     function onWrite(writeErr){ // TODO create key and iv write them to file
                         if(writeErr){console.log('template write error: ' + writeErr);}
                         else{
-                            console.log('No config exist for this environment. Made template one with shared key');
-                            console.log('Configuration can be found at ' + configFile);
-                            console.log('Please add configuration to this file');
+                            console.log('Configuration template made for ' + env + ' at ' + configFile);
+                            console.log('Edit this file to add enviroment variables that will be decrypted by a shared key on deployment');
                         }
                     }
                 );
@@ -143,6 +144,7 @@ var pm2 = {
         if(error){console.log(error);}
     },
     deploy: function(service){                        // what to do on deploy step
+        // TODO make sure that you grab decrypted configuration in some way
         for(var proc = 0; proc < pm2.daemons.length; proc++){
             if(pm2.daemons[proc] === service){
                 pm2.pkg.restart(service, pm2.onTurnOver);
@@ -172,49 +174,33 @@ var run = {
     startCMD: 'npm run start',       // default command for starting an application
     PATH: process.env.PATH,
     cmd: function(command, cmdName, onSuccess, onFail){
+        console.log('Jitploy running:' + command);
         command = 'cd ' + run.servicePath + ' && PATH=' + run.PATH + ' ' + command; // cwd makes sure we are in working directory that we originated from
-        console.log('running command:' + command);
-        run[cmdName] = run.child.exec(command, config.options);
-        run[cmdName].stdout.on('data', function(data){console.log("" + data);});
-        run[cmdName].stderr.on('data', function(data){console.log("" + data);});
+        run[cmdName] = run.child.exec(command);
+        run[cmdName].stdout.on('data', console.log);
+        run[cmdName].stderr.on('data', console.log);
         run[cmdName].on('close', function doneCommand(code){
             if(code){onFail(code);}
             else {onSuccess();}
         });
         run[cmdName].on('error', function(error){console.log('child exec error: ' + error);});
     },
-    deploy: function(service, options){                                      // runs either on start up or every time jitploy server pings
-        if(service){
+    deploy: function(service, options){                            // runs either on start up or every time jitploy server pings
+        if(service && options){                                    // given this is being called from cli
             run.service = service;
-            run.servicePath = path.resolve(path.dirname(service));
-        }  // path of file that is passed
-        if(options){ // remember we get non-when server triggers deploy
-            if(options.eco){                                         // can only use ether ecosystem or pm2 not both, only need to set on startup
-                var ecoConfig = require(run.servicePath + '/ecosystem.config.js'); // import config module, that one would otherwise use for pm2
-                run.startCMD = 'node ' + ecoConfig.apps[0].script;   // config should have absolute path to service
-                config.options.env = ecoConfig.apps[0].env;          // In this config is loaded from this ecosystem file and can only change on restart
-            }
-            run.pull(options.configKey);
-        } else {run.pull();}                                     // we are just concerned with pulling when server ask for a deploy
+            run.servicePath = path.resolve(path.dirname(service)); // path of file that is passed
+            if(options.configKey){ run.config = options.configKey;}// Set config key, if we have something to decrypt
+        }
+        run.pull();  // remember we get nothing when server triggers deploy
     },
-    pull: function(configKey){
-        run.cmd('git pull', 'gitPull', function pullSuccess(){   // pull new code
-            if(run.config){                                      // has config already been stored: deploy cases
-                config.run(run.config.key, run.install);         // decrypt configuration then install
-            } else if (configKey){                               // we need a key if we ever want to decrypt a config
-                config.check(run.servicePath, function(hasConfig){ // first check if we have a config folder with things to decrypt at all
-                    if(hasConfig){                               // only try to do any of this with a config folder
-                        run.config = configKey;                  // want to remember key so it can be passed each deploy
-                        config.run(run.config.key, run.servicePath, run.install); // decrypt configuration then install
-                    }
-                });
-            } else {                                           // otherwise assume config is static on server
-                run.install();                                 // npm install step, reflect package.json changes
-            }
+    pull: function(){
+        run.cmd('git pull', 'gitPull', function pullSuccess(){        // pull new code
+            config.decrypt(run.config, run.servicePath, run.install); // decrypt configuration if it exist then install
         }, function pullFail(code){console.log('no pull? ' + code);});
     },
-    install: function(){ // and probably restart when done
+    install: function(configVars){ //  npm install step, reflect package.json changes and probably restart when done
         run.cmd('npm install', 'npmInstall', function installSuccess(){
+            // TODO pass configuration variables
             pm2.deploy(run.service); // once npm install is complete restart service
         }, function installFail(code){
             console.log('bad install? ' + code);
@@ -246,12 +232,9 @@ var cli = {
             .command('decrypt')
             .usage('[options] <directory ...>')
             .option('-g, --secret <secret>', 'key to unlock service config')
-            .option('-i, --iv <iv>', 'initialization Vector, my pokemons will be amazing')
             .alias('unlock')
             .action(function(dir, options){
-                config.run(options.secret, options.iv, path.resolve(path.dirname(dir)), function onFinish(){
-                    console.log('Decrypted config');
-                });
+                config.decrypt(options.secret, path.resolve(path.dirname(dir)), console.log);
             });
         cli.program.parse(process.argv);
         if(cli.program.args.length === 0){cli.program.help();}
