@@ -9,6 +9,8 @@ var DAEMON_MODE = 'deamon_mode';
 var SERVICE = 2; // Order arguments are taken in deamon mode
 var OPTIONS = 3;
 var DAEMON  = 4;
+var CONFIG_FOLDER = '/jitploy';
+var ALGORITHM = 'aes-128-cbc';
 
 var getMillis = {
     toTimeTomorrow: function(hour){                     // millitary hour minus one
@@ -66,21 +68,70 @@ var config = {
     options: {
         env: {}
     }, // ultimately config vars are stored here and past to program being tracked
-    run: function(configKey, cwd, onFinsh){
-        var readFile = fs.createReadStream(cwd + '/config/encrypted_' + config.env);
-        var decrypt = config.crypto.createDecipher('aes-256-ctr',  configKey);
-        var writeFile = fs.createWriteStream(cwd + '/config/decrypted_' + config.env + '.js');
+    run: function(configKey, iv, cwd, onFinsh){ // TODO add IV to everything else
+        var readFile = fs.createReadStream(cwd + CONFIG_FOLDER + '/encrypted_' + config.env);
+        var decrypt = config.crypto.createDecipheriv(ALGORITHM,  new Buffer(configKey, 'base64'), new Buffer(iv, 'base64'));
+        var writeFile = fs.createWriteStream(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.js');
         readFile.pipe(decrypt).pipe(writeFile);
         writeFile.on('finish', function(){
-            config.options.env = require(cwd + '/config/decrypted_' + config.env + '.js');
+            config.options.env = require(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.js');
             onFinsh(); // call next thing to do, prabably npm install // TODO probably should be passing environment vars
         });
     },
     check: function(servicePath, hasConfig){ // checks if config exist
-        fs.stat(servicePath + '/config', function checkConfig(error, stats){
+        fs.stat(servicePath + CONFIG_FOLDER, function checkConfig(error, stats){
             if(error)                            {console.log('on checking config folder: ' + error);}
             else if(stats && stats.isDirectory()){hasConfig(true);}
             else                                 {hasConfig(false);}
+        });
+    },
+    lock: function(dir, options){   // Polymorphic, creates template or encrypts potential changes and additions
+        var env = 'local'; // default value for evinviornment
+        if(options && options.env){env = options.env;}
+        var servicePath = path.resolve(path.dirname(dir));
+        fs.mkdir(servicePath + CONFIG_FOLDER, function(error){
+            if(error){
+                if(error.code === 'EEXIST'){config.template(servicePath, env);} // Internet said this was a bad idea
+                else {console.log('Error on making directory: ' + error);}
+            } else {config.template(servicePath);}
+        });
+    },
+    template: function(servicePath, env){
+        var configFile = servicePath + CONFIG_FOLDER + '/decrypted_' + env + '.js';
+        fs.open(configFile, 'wx', function template(error, fileData){
+            if(error){
+                if(error.code === 'EEXIST'){                             // In case where decrypted file exist
+                    var existing = require(configFile);                  // read shared secret and initialization vector
+                    if(existing.JITPLOY_SHARED_KEY && existing.JITPLOY_IV){
+                        config.encrypt(servicePath, env, existing.JITPLOY_SHARED_KEY, existing.JITPLOY_IV);
+                    } else {console.log('shared key is missing, not sure what to do');}
+                } else { console.log('on checking for config file: ' + error);}
+            } else {
+                var sharedSecret = config.crypto.randomBytes(16).toString('base64');
+                var initializationVector = config.crypto.randomBytes(16).toString('base64');
+                fs.writeFile(fileData,
+                    'module.exports = {\n' +
+                    '    JITPLOY_SHARED_KEY: \'' + sharedSecret + '\',\n' +
+                    '    JITPLOY_IV: \'' + initializationVector + '\'\n' +
+                    '};\n',
+                    function onWrite(writeErr){ // TODO create key and iv write them to file
+                        if(writeErr){console.log('shite');}
+                        else{
+                            console.log('No config exist for this environment. Made template one with shared key');
+                            console.log('Configuration can be found at ' + configFile);
+                            console.log('Please add configuration to this file');
+                        }
+                    }
+                );
+            }
+        });
+    },
+    encrypt: function(servicePath, env, sharedSecret, iv){
+        fs.stat(servicePath + CONFIG_FOLDER + '/encrypted_' + env, function template(error, stats){ // test if we have env file we are looking for
+            var readFile = fs.createReadStream(servicePath + CONFIG_FOLDER + '/decrypted_' + env + '.js');
+            var encrypt = config.crypto.createCipheriv(ALGORITHM, new Buffer(sharedSecret, 'base64'), new Buffer(iv, 'base64'));
+            var writeFile = fs.createWriteStream(servicePath + CONFIG_FOLDER + '/encrypted_' + env);
+            readFile.pipe(encrypt).pipe(writeFile);
         });
     }
 };
@@ -187,13 +238,22 @@ var cli = {
             .action(cli.run);
         cli.program
             .command('configlock')
-            .description('locks up configuration ')
+            .usage('[options] <directory ...>')
+            .option('-e, --env <env>', 'environment being encrypted')
+            .description('encrypts configuration')
             .alias('lock')
-            .action(function test(){
-                console.log('pretending to lock configuration');
+            .action(config.lock);
+        cli.program
+            .command('decrypt')
+            .usage('[options] <directory ...>')
+            .option('-g, --secret <secret>', 'key to unlock service config')
+            .option('-i, --iv <iv>', 'initialization Vector, my pokemons will be amazing')
+            .alias('unlock')
+            .action(function(dir, options){
+                config.run(options.secret, options.iv, path.resolve(path.dirname(dir)), function onFinish(){
+                    console.log('Decrypted config');
+                });
             });
-
-
         cli.program.parse(process.argv);
         if(cli.program.args.length === 0){cli.program.help();}
     },
