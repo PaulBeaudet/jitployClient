@@ -115,7 +115,7 @@ var config = {
                     '    JITPLOY_IV: \'' + initializationVector + '\'\n' +
                     '};\n',
                     function onWrite(writeErr){ // TODO create key and iv write them to file
-                        if(writeErr){console.log('shite');}
+                        if(writeErr){console.log('template write error: ' + writeErr);}
                         else{
                             console.log('No config exist for this environment. Made template one with shared key');
                             console.log('Configuration can be found at ' + configFile);
@@ -168,7 +168,6 @@ var pm2 = {
 var run = {
     child: require('child_process'),
     config: false,                   // default to false in case no can has config deploys assuming static config
-    pm2: false,                      // not whether service process is being managed my pm2 or this service
     servicePath: false,
     startCMD: 'npm run start',       // default command for starting an application
     PATH: process.env.PATH,
