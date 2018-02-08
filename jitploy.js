@@ -251,7 +251,7 @@ var cli = {
             server: options.server,
             eco: options.eco
         };
-        pm2.startup('jitploy', function onStart(error){               // call thy self as a pm2 deamon
+        pm2.startup(process.argv[1], function onStart(error){               // call thy self as a pm2 deamon
             if(error){
                 console.log(error);
                 process.exit(1);    // ungraceful exit
