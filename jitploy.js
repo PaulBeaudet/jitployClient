@@ -85,15 +85,19 @@ var config = {
             });
         } else {onFinish(false);}
     },
-    lock: function(dir, options){   // Polymorphic, creates template or encrypts potential changes and additions
-        var env = config.env;        // default value for evnviornment
-        if(options && options.env){env = options.env;}
+    lock: function(dir, env){   // Polymorphic, creates template or encrypts potential changes and additions
+        if(!env){env = config.env;}
         var servicePath = path.resolve(path.dirname(dir));
-        fs.mkdir(servicePath + CONFIG_FOLDER, function(error){
-            if(error){
-                if(error.code === 'EEXIST'){config.template(servicePath, env);} // Internet said this was a bad idea
-                else {console.log('Error on making directory: ' + error);}
-            } else {config.template(servicePath, env);}
+        fs.mkdir(servicePath + CONFIG_FOLDER, function(mkdirError){
+            if(mkdirError){
+                if(mkdirError.code === 'EEXIST'){config.template(servicePath, env);} // Internet said this was a bad idea
+                else {console.log('Error on making directory: ' + mkdirError);}
+            } else { // given this is first time configuring, want to exclude decrypted file patterns from version control
+                fs.appendFile(servicePath + '/.gitignore', CONFIG_FOLDER.substr(1, CONFIG_FOLDER.length) + '/decrypted_*', function addedToGitignore(appendError){
+                    if(appendError){console.log('Failed to exclude decrypted file from git, you might want to manually do that: ' + appendError);}
+                    config.template(servicePath, env); // Create decrypted file template regardless
+                });
+            }
         });
     },
     template: function(servicePath, env){
@@ -233,7 +237,7 @@ var cli = {
             .option('-e, --env <env>', 'environment being encrypted')
             .description('encrypts configuration')
             .alias('lock')
-            .action(config.lock);
+            .action(function(dir, options){config.lock(dir, options.env);});
         cli.program
             .command('decrypt')
             .usage('[options] <directory ...>')
