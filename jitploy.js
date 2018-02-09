@@ -63,48 +63,51 @@ var config = {
     env: 'local', // hard coding to local for now TODO make this configurable
     crypto: require('crypto'),
     yaml: require('js-yaml'),
-    decrypt: function(configKey, cwd, onFinish){
-        if(configKey){ // important part of decrypting something
-            fs.stat(cwd + CONFIG_FOLDER + '/encrypted_' + config.env, function onFileCheck(error, stats){
+    decrypt: function(configKey, cwd, onFinish, env){
+        if(env){config.env = env;} // If specified change default env to specified one so that it is called on subsequent deploys
+        else{env = config.env;}    // Given no specification use default env
+        console.log(env);
+        if(configKey){             // shared secret aka important part of decrypting something
+            fs.stat(cwd + CONFIG_FOLDER + '/encrypted_' + env, function onFileCheck(error, stats){
                 if(error){
                     console.log(error);
-                    onFinish(false);
+                    onFinish();
                 } else if(stats.isFile()){ // if this file exist we have something to read from and a folder to write into
-                    var readFile = fs.createReadStream(cwd + CONFIG_FOLDER + '/encrypted_' + config.env);
+                    var readFile = fs.createReadStream(cwd + CONFIG_FOLDER + '/encrypted_' + env);
                     var sharedKey = configKey.substr(0, configKey.length/2);
                     var iv = configKey.substr(configKey.length/2, configKey.length);
                     var decrypt = config.crypto.createDecipheriv(ALGORITHM,  new Buffer(sharedKey, 'base64'), new Buffer(iv, 'base64'));
-                    var writeFile = fs.createWriteStream(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.yml');
+                    var writeFile = fs.createWriteStream(cwd + CONFIG_FOLDER + '/decrypted_' + env + '.yml');
                     readFile.pipe(decrypt).pipe(writeFile);
                     writeFile.on('finish', function(){
-                        fs.readFile(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.yml', 'utf8', function(err, data){
+                        fs.readFile(cwd + CONFIG_FOLDER + '/decrypted_' + env + '.yml', 'utf8', function(err, data){
                             onFinish(config.yaml.safeLoad(data));   // pass env vars and call next thing to do
                         });
                     });
-                } else {console.log('config: no file or error');onFinish(false);}
+                } else {console.log('config: no file or error'); onFinish();}
             });
-        } else {onFinish(false);}
+        } else {onFinish();} // No encrypted config is an option, in this case just pass through
     },
-    lock: function(dir, env){   // Polymorphic, creates template or encrypts potential changes and additions
+    lock: function(dir, env, tempOnly){   // Polymorphic, creates template or encrypts potential changes and additions
         if(!env){env = config.env;}
         var servicePath = path.resolve(path.dirname(dir));
         fs.mkdir(servicePath + CONFIG_FOLDER, function(mkdirError){
             if(mkdirError){
-                if(mkdirError.code === 'EEXIST'){config.template(servicePath, env);} // Internet said this was a bad idea
+                if(mkdirError.code === 'EEXIST'){config.template(servicePath, env, tempOnly);} // Internet said this was a bad idea
                 else {console.log('Error on making directory: ' + mkdirError);}
             } else { // given this is first time configuring, want to exclude decrypted file patterns from version control
                 fs.appendFile(servicePath + '/.gitignore', CONFIG_FOLDER.substr(1, CONFIG_FOLDER.length) + '/decrypted_*', function addedToGitignore(appendError){
                     if(appendError){console.log('Failed to exclude decrypted file from git, you might want to manually do that: ' + appendError);}
-                    config.template(servicePath, env); // Create decrypted file template regardless
+                    config.template(servicePath, env, tempOnly); // Create decrypted file template regardless
                 });
             }
         });
     },
-    template: function(servicePath, env){
+    template: function(servicePath, env, tempOnly){
         var configFile = servicePath + CONFIG_FOLDER + '/decrypted_' + env + '.yml';
         fs.open(configFile, 'wx', function template(error, fileData){
             if(error){
-                if(error.code === 'EEXIST'){                             // In case where decrypted file exist
+                if(error.code === 'EEXIST' && !tempOnly){                    // In case where decrypted file exist
                     fs.readFile(configFile, function readTheFile(readErr, data){
                         var existing = config.yaml.safeLoad(data);
                         if(existing.JITPLOY_SHARED_KEY){
@@ -113,7 +116,7 @@ var config = {
                             config.encrypt(servicePath, env, sharedKey, iv);
                         } else {console.log('shared key is missing, not sure what to do');}
                     });
-                } else { console.log('on checking for config file: ' + error);}
+                } else { console.log('on attempting to work config file: ' + error);}
             } else {
                 var sharedSecret = config.crypto.randomBytes(16).toString('base64');
                 var initializationVector = config.crypto.randomBytes(16).toString('base64');
@@ -150,8 +153,6 @@ var pm2 = {
         if(error){console.log(error);}
     },
     deploy: function(service, env){                   // what to do on deploy step
-        // TODO make sure that you grab decrypted configuration in some way
-        console.log(env);
         var existing = false;
         for(var proc = 0; proc < pm2.daemons.length; proc++){
             if(pm2.daemons[proc] === service){existing = true;}
@@ -162,14 +163,14 @@ var pm2 = {
                 pm2.startup(service, env, pm2.onTurnOver);
             });
         } else {
-            pm2.startup(service, env, pm2.onTurnOver);  // given function has yet to exit
+            pm2.startup(service, env, pm2.onTurnOver);       // given function has yet to exit
         }
     },
     startup: function(service, env, onStart){                // deamonizes pm2 which will run app non interactively
         pm2.pkg.connect(function onPM2connect(error){        // This would also connect to an already running deamon if it exist
             if(error){onStart(error);}                       // abstract error handling
             else {
-                if(!env){env = {};}                        // given no arguments pass no arguments
+                if(!env){env = {};}                          // given no arguments pass no arguments
                 pm2.pkg.start({script: service, env: env, logDateFormat:"YYYY-MM-DD HH:mm Z"}, function initStart(err, proc){
                     pm2.daemons.push(service);               // add this name to our list of running daemons
                     onStart(err);
@@ -197,17 +198,17 @@ var run = {
         });
         run[cmdName].on('error', function(error){console.log('child exec error: ' + error);});
     },
-    deploy: function(service, configKey){                          // runs either on start up or every time jitploy server pings
+    deploy: function(service, configKey, env){                     // runs either on start up or every time jitploy server pings
         if(service){                                               // given this is being called from cli
             run.service = service;
             run.servicePath = path.resolve(path.dirname(service)); // path of file that is passed
             if(configKey){run.config = configKey;}                 // Set config key, if we have something to decrypt and something to do it with
         }
-        run.pull();  // remember we get nothing when server triggers deploy
+        run.pull(env);  // remember we get nothing when server triggers deploy
     },
-    pull: function(){
-        run.cmd('git pull', 'gitPull', function pullSuccess(){        // pull new code
-            config.decrypt(run.config, run.servicePath, run.install); // decrypt configuration if it exist then install
+    pull: function(env){
+        run.cmd('git pull', 'gitPull', function pullSuccess(){             // pull new code
+            config.decrypt(run.config, run.servicePath, run.install, env); // decrypt configuration if it exist then install
         }, function pullFail(code){console.log('no pull? ' + code);});
     },
     install: function(configVars){ //  npm install step, reflect package.json changes and probably restart when done
@@ -230,22 +231,22 @@ var cli = {
             .option('-t, --token <token>', 'config token to use service')
             .option('-r, --repo <repo>', 'repo name')
             .option('-s, --server <server>', 'jitploy server to connect to')
+            .option('-e, --env <env>', 'unlocks for x enviroment')
             .action(cli.run);
         cli.program
-            .command('configlock')
+            .command('lock')
             .usage('[options] <directory ...>')
-            .option('-e, --env <env>', 'environment being encrypted')
-            .description('encrypts configuration')
-            .alias('lock')
-            .action(function(dir, options){config.lock(dir, options.env);});
+            .description('encrypts configuration, on templates a decrypted file if its non existent')
+            .action(function encryptConfig(dir, options){config.lock(dir, options.parent.env);});
         cli.program
-            .command('decrypt')
+            .command('unlock')
             .usage('[options] <directory ...>')
-            .option('-g, --secret <secret>', 'key to unlock service config')
-            .alias('unlock')
-            .action(function(dir, options){
-                config.decrypt(options.secret, path.resolve(path.dirname(dir)), console.log);
-            });
+            .action(function decrypetConfig(dir, options){
+                config.decrypt(options.parent.key, path.resolve(path.dirname(dir)), console.log, options.parent.env);});
+        cli.program
+            .command('template')
+            .usage('[options] <directory ...>')
+            .action(function templateConfig(dir, options){config.lock(dir, options.parent.env, true);}); // Pass true for template only option
         cli.program.parse(process.argv);
         if(cli.program.args.length === 0){cli.program.help();}
     },
@@ -259,6 +260,7 @@ var cli = {
             token: options.token,
             repo: options.repo,
             server: options.server,
+            enviroment: options.env, // DONT NAME THIS PROPERTY ENV, IT PASSES WEIRD STUFF [obj obj]
             SERVICE: service,
             DAEMON: DAEMON_MODE
         }, function onStart(error){              // call thy self as a pm2 deamon
@@ -279,7 +281,7 @@ if(process.env.DAEMON === DAEMON_MODE){              // given program is being c
         repo: process.env.repo,
         server: process.env.server
     }); // start up socket client
-    run.deploy(process.env.SERVICE, process.env.key); // runs deployment steps
+    run.deploy(process.env.SERVICE, process.env.key, process.env.enviroment); // runs deployment steps
 } else {
     cli.setup();
 }
