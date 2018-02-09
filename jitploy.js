@@ -66,7 +66,6 @@ var config = {
     decrypt: function(configKey, cwd, onFinish, env){
         if(env){config.env = env;} // If specified change default env to specified one so that it is called on subsequent deploys
         else{env = config.env;}    // Given no specification use default env
-        console.log(env);
         if(configKey){             // shared secret aka important part of decrypting something
             fs.stat(cwd + CONFIG_FOLDER + '/encrypted_' + env, function onFileCheck(error, stats){
                 if(error){
