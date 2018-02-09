@@ -4,7 +4,7 @@
 var path = require('path');
 var fs = require('fs');
 var CD_HOURS_START = 12;// 16;    // 5  pm UTC / 12 EST  // Defines hours when deployments can happen
-var CD_HOURS_END   = 18;// 21;    // 10 pm UTC /  5 EST  // TODO Create an option to change default
+var CD_HOURS_END   = 23;// 21;    // 10 pm UTC /  5 EST  // TODO Create an option to change default
 var DAEMON_MODE = 'deamon_mode';
 var CONFIG_FOLDER = '/jitploy';
 var ALGORITHM = 'aes-128-cbc';
@@ -62,6 +62,7 @@ var jitploy = {
 var config = {
     env: 'local', // hard coding to local for now TODO make this configurable
     crypto: require('crypto'),
+    yaml: require('js-yaml'),
     decrypt: function(configKey, cwd, onFinish){
         if(configKey){ // important part of decrypting something
             fs.stat(cwd + CONFIG_FOLDER + '/encrypted_' + config.env, function onFileCheck(error, stats){
@@ -73,12 +74,14 @@ var config = {
                     var sharedKey = configKey.substr(0, configKey.length/2);
                     var iv = configKey.substr(configKey.length/2, configKey.length);
                     var decrypt = config.crypto.createDecipheriv(ALGORITHM,  new Buffer(sharedKey, 'base64'), new Buffer(iv, 'base64'));
-                    var writeFile = fs.createWriteStream(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.js');
+                    var writeFile = fs.createWriteStream(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.yml');
                     readFile.pipe(decrypt).pipe(writeFile);
                     writeFile.on('finish', function(){
-                        onFinish(require(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.js')); // pass env vars and call next thing to do
+                        fs.readFile(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.yml', 'utf8', function(err, data){
+                            onFinish(config.yaml.safeLoad(data));   // pass env vars and call next thing to do
+                        });
                     });
-                } else {onFinish(false);}
+                } else {console.log('config: no file or error');onFinish(false);}
             });
         } else {onFinish(false);}
     },
@@ -94,25 +97,27 @@ var config = {
         });
     },
     template: function(servicePath, env){
-        var configFile = servicePath + CONFIG_FOLDER + '/decrypted_' + env + '.js';
+        var configFile = servicePath + CONFIG_FOLDER + '/decrypted_' + env + '.yml';
         fs.open(configFile, 'wx', function template(error, fileData){
             if(error){
                 if(error.code === 'EEXIST'){                             // In case where decrypted file exist
-                    var existing = require(configFile);                  // read shared secret and initialization vector
-                    if(existing.JITPLOY_SHARED_KEY){
-                        var sharedKey = existing.JITPLOY_SHARED_KEY.substr(0, existing.JITPLOY_SHARED_KEY.length/2);
-                        var iv = existing.JITPLOY_SHARED_KEY.substr(existing.JITPLOY_SHARED_KEY.length/2, existing.JITPLOY_SHARED_KEY.length);
-                        config.encrypt(servicePath, env, sharedKey, iv);
-                    } else {console.log('shared key is missing, not sure what to do');}
+                    fs.readFile(configFile, function readTheFile(readErr, data){
+                        var existing = config.yaml.safeLoad(data);
+                        if(existing.JITPLOY_SHARED_KEY){
+                            var sharedKey = existing.JITPLOY_SHARED_KEY.substr(0, existing.JITPLOY_SHARED_KEY.length/2);
+                            var iv = existing.JITPLOY_SHARED_KEY.substr(existing.JITPLOY_SHARED_KEY.length/2, existing.JITPLOY_SHARED_KEY.length);
+                            config.encrypt(servicePath, env, sharedKey, iv);
+                        } else {console.log('shared key is missing, not sure what to do');}
+                    });
                 } else { console.log('on checking for config file: ' + error);}
             } else {
                 var sharedSecret = config.crypto.randomBytes(16).toString('base64');
                 var initializationVector = config.crypto.randomBytes(16).toString('base64');
                 fs.writeFile(fileData,
-                    '// Add properties to this module in order set configuration for ' + env + ' environment\n' +
-                    'module.exports = {\n' +
-                    '    JITPLOY_SHARED_KEY: \'' + sharedSecret + initializationVector + '\' // Shared key for remote target enviroment, encrypts this file\n' +
-                    '};\n',
+                    '# Add properties to this module in order set configuration for ' + env + ' environment\n' +
+                    '{\n' +
+                    '    JITPLOY_SHARED_KEY: \'' + sharedSecret + initializationVector + '\' # Shared key for remote target enviroment, encrypts this file\n' +
+                    '}\n',
                     function onWrite(writeErr){ // TODO create key and iv write them to file
                         if(writeErr){console.log('template write error: ' + writeErr);}
                         else{
@@ -126,7 +131,7 @@ var config = {
     },
     encrypt: function(servicePath, env, sharedSecret, iv){
         fs.stat(servicePath + CONFIG_FOLDER + '/encrypted_' + env, function template(error, stats){ // test if we have env file we are looking for
-            var readFile = fs.createReadStream(servicePath + CONFIG_FOLDER + '/decrypted_' + env + '.js');
+            var readFile = fs.createReadStream(servicePath + CONFIG_FOLDER + '/decrypted_' + env + '.yml');
             var encrypt = config.crypto.createCipheriv(ALGORITHM, new Buffer(sharedSecret, 'base64'), new Buffer(iv, 'base64'));
             var writeFile = fs.createWriteStream(servicePath + CONFIG_FOLDER + '/encrypted_' + env);
             readFile.pipe(encrypt).pipe(writeFile);
@@ -142,13 +147,19 @@ var pm2 = {
     },
     deploy: function(service, env){                   // what to do on deploy step
         // TODO make sure that you grab decrypted configuration in some way
+        console.log(env);
+        var existing = false;
         for(var proc = 0; proc < pm2.daemons.length; proc++){
-            if(pm2.daemons[proc] === service){
-                pm2.pkg.restart(service, pm2.onTurnOver);
-                return true;                         // exit function when we have found what we are looking for
-            }
+            if(pm2.daemons[proc] === service){existing = true;}
         }
-        pm2.startup(service, env, pm2.onTurnOver);  // given function has yet to exit
+        if(existing){
+            pm2.pkg.delete(service, function onStop(error){
+                if(error){console.log(error);}
+                pm2.startup(service, env, pm2.onTurnOver);
+            });
+        } else {
+            pm2.startup(service, env, pm2.onTurnOver);  // given function has yet to exit
+        }
     },
     startup: function(service, env, onStart){                // deamonizes pm2 which will run app non interactively
         pm2.pkg.connect(function onPM2connect(error){        // This would also connect to an already running deamon if it exist

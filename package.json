@@ -22,6 +22,7 @@
     "homepage": "https://github.com/PaulBeaudet/jitployClient#readme",
     "dependencies": {
         "commander": "^2.11.0",
+        "js-yaml": "^3.10.0",
         "pm2": "^2.9.3",
         "socket.io-client": "^2.0.3"
     }
