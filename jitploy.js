@@ -225,7 +225,7 @@ var cli = {
         cli.program
             .version(require('./package.json').version); // grabs currently published version
         cli.program
-            .usage('[options] <file ...>')               // as far as I understand this is just for the help dialog
+            .usage('[options] <file ...>')
             .option('-k, --key <key>', 'key to unlock service config')
             .option('-t, --token <token>', 'config token to use service')
             .option('-r, --repo <repo>', 'repo name')
@@ -236,12 +236,11 @@ var cli = {
             .command('lock')
             .usage('[options] <directory ...>')
             .description('encrypts configuration, on templates a decrypted file if its non existent')
-            .action(function encryptConfig(dir, options){config.lock(dir, options.parent.env);});
+            .action(function encryptIt(dir, options){config.lock(dir, options.parent.env);});
         cli.program
             .command('unlock')
             .usage('[options] <directory ...>')
-            .action(function decrypetConfig(dir, options){
-                config.decrypt(options.parent.key, path.resolve(path.dirname(dir)), console.log, options.parent.env);});
+            .action(function decryptIt(dir, options){config.decrypt(options.parent.key, path.resolve(path.dirname(dir)), console.log, options.parent.env);});
         cli.program
             .command('template')
             .usage('[options] <directory ...>')
