@@ -3,31 +3,9 @@
 "use strict";
 var path = require('path');
 var fs = require('fs');
-var CD_HOURS_START = 12;// 16;    // 5  pm UTC / 12 EST  // Defines hours when deployments can happen
-var CD_HOURS_END   = 23;// 21;    // 10 pm UTC /  5 EST  // TODO Create an option to change default
 var DAEMON_MODE = 'deamon_mode';
 var CONFIG_FOLDER = '/jitploy';
 var ALGORITHM = 'aes-128-cbc';
-
-var getMillis = {
-    toTimeTomorrow: function(hour){                     // millitary hour minus one
-        var currentTime = new Date().getTime();         // current millis from epoch
-        var tomorrowAtX = new Date();                   // create date object for tomorrow
-        tomorrowAtX.setDate(tomorrowAtX.getDate() + 1); // point date to tomorrow
-        tomorrowAtX.setHours(hour, 0, 0, 0);            // set hour to send tomorrow
-        return tomorrowAtX.getTime() - currentTime;     // subtract tomo millis from epoch from current millis from epoch
-    },
-    toOffHours: function(hourStart, hourEnd){
-        var currentDate = new Date();
-        var currentHour = currentDate.getHours();
-        if(currentHour < hourStart || currentHour > hourEnd){
-            return 0;
-        } // it is an off hour there is no millis till off
-        var currentMillis = currentDate.getTime();
-        var offTime = currentDate.setHours(hourEnd, 0, 0, 0);
-        return offTime - currentMillis; // return millis before on time is up
-    }
-};
 
 var jitploy = {
     SERVER: 'https://jitploy.herokuapp.com/',                  // Defaults to sass server, you can run your own if you like
@@ -43,19 +21,19 @@ var jitploy = {
                     name: options.repo
                 });                                                // its important lisner know that we are for real
                 jitploy.client.on('deploy', run.deploy);           // respond to deploy events
+                jitploy.client.on('break', function breakTime(data){
+                    if(data.time){jitploy.takeABreak(options.token, options.repo, data.time);}
+                });
             });
-            setTimeout(function(){
-                jitploy.takeABreak(options.token, options.repo);
-            }, getMillis.toOffHours(CD_HOURS_START, CD_HOURS_END));
         } else {console.log('Configuration issues');}              // maybe process should end itself if this is true
     },
-    takeABreak: function(token, repo){
+    takeABreak: function(token, repo, durration){
         console.log('Taking a break from continueous deployment');
         jitploy.client.close();                               // stop bothering the server you'll keep it awake
         setTimeout(function startAgain(){                     // initialize the connection to deployment again tomorrow
             console.log('Starting continueous deployment connection back up');
             jitploy.init({token:token, repo:repo});
-        }, getMillis.toTimeTomorrow(CD_HOURS_START));         // get millis to desired time tomorrow
+        }, durration);         // get millis to desired time tomorrow
     }
 };
 
