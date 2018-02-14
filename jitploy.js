@@ -175,22 +175,25 @@ var run = {
         });
         run[cmdName].on('error', function(error){console.log('child exec error: ' + error);});
     },
-    deploy: function(service, configKey, env){                     // runs either on start up or every time jitploy server pings
+    deploy: function(service, configKey, env, jitployStart){       // runs either on start up or every time jitploy server pings
         if(service){                                               // given this is being called from cli
             run.service = service;
             run.servicePath = path.resolve(path.dirname(service)); // path of file that is passed
             if(configKey){run.config = configKey;}                 // Set config key, if we have something to decrypt and something to do it with
         }
-        run.pull(env);  // remember we get nothing when server triggers deploy
+        run.pull(env, jitployStart);                               // remember we get nothing when server triggers deploy
     },
-    pull: function(env){
+    pull: function(env, jitployStart){
         run.cmd('git pull', 'gitPull', function pullSuccess(){             // pull new code
-            config.decrypt(run.config, run.servicePath, run.install, env); // decrypt configuration if it exist then install
+            config.decrypt(run.config, run.servicePath, function onConfig(configVars){
+                run.install(configVars, jitployStart);
+            }, env); // decrypt configuration if it exist then install
         }, function pullFail(code){console.log('no pull? ' + code);});
     },
-    install: function(configVars){ //  npm install step, reflect package.json changes and probably restart when done
+    install: function(configVars, jitployStart){ //  npm install step, reflect package.json changes and probably restart when done
         run.cmd('npm install', 'npmInstall', function installSuccess(){
             pm2.deploy(run.service, configVars); // once npm install is complete restart service
+            if(jitployStart){setTimeout(jitployStart, 2000);} // only connect with jitploy server if service successfully launches
         }, function installFail(code){
             console.log('bad install? ' + code);
         });
@@ -251,13 +254,14 @@ var cli = {
     }
 };
 
-if(process.env.DAEMON === DAEMON_MODE){              // given program is being called as a pm2 deamon
-    jitploy.init({
-        token: process.env.token,
-        repo: process.env.repo,
-        server: process.env.server
-    }); // start up socket client
-    run.deploy(process.env.SERVICE, process.env.key, process.env.enviroment); // runs deployment steps
+if(process.env.DAEMON === DAEMON_MODE){  // given program is being called as a pm2 deamon
+    run.deploy(process.env.SERVICE, process.env.key, process.env.enviroment, function startJitploy(){
+        jitploy.init({                   // start up socket client when service is deployed
+            token: process.env.token,
+            repo: process.env.repo,
+            server: process.env.server
+        });
+    });                                  // run.deploy called in this manner initiates deployment steps
 } else {
-    cli.setup();
+    cli.setup();                         // Assume process is being called from commandline when without DAEMON_MODE ENV
 }
