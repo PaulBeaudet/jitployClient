@@ -8,7 +8,7 @@ var CONFIG_FOLDER = '/jitploy';
 var ALGORITHM = 'aes-128-cbc';
 
 var jitploy = {
-    SERVER: 'https://jitploy.herokuapp.com/',                  // Defaults to sass server, you can run your own if you like
+    SERVER: 'https://jitploy.deabute.com/',                  // Defaults to sass server, you can run your own if you like
     io: require('socket.io-client'),                           // to connect to our jitploy intergration server
     client: null,
     init: function(options){
