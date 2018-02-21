@@ -19,28 +19,17 @@ var ALGORITHM = 'aes-128-cbc';
 var jitploy = {
     SERVER: 'https://jitploy.deabute.com/',                        // Defaults to sass server, you can run your own if you like
     init: function(options){
-        if(options && options.token && options.repo){
+        if(options && options.repo){
             if(options.server){jitploy.SERVER = options.server;}
             jitploy.client = ioclient(jitploy.SERVER);             // jitploy socket server connection initiation
             jitploy.client.on('connect', function authenticate(){  // connect with orcastrator
-                jitploy.client.emit('authenticate', {              // NOTE assumes TLS is in place otherwise this is useless
+                jitploy.client.emit('authenticate', {                       // NOTE assumes TLS is in place otherwise this is useless
                     token: options.token,
                     name: options.repo
                 });                                                // its important lisner know that we are for real
                 jitploy.client.on('deploy', run.deploy);           // respond to deploy events
-                jitploy.client.on('break', function breakTime(data){
-                    if(data.time){jitploy.takeABreak(options.token, options.repo, data.time);}
-                });
             });
         } else {console.log('Configuration issues');}              // maybe process should end itself if this is true
-    },
-    takeABreak: function(token, repo, durration){
-        console.log('Taking a break from continueous deployment');
-        jitploy.client.close();                                    // stop bothering the server you'll keep it awake
-        setTimeout(function startAgain(){                          // initialize the connection to deployment again tomorrow
-            console.log('Starting continueous deployment connection back up');
-            jitploy.init({token:token, repo:repo});
-        }, durration);                                             // get millis to desired time tomorrow
     }
 };
 
@@ -209,7 +198,7 @@ var cli = {
         commander
             .usage('[options] <file ...>')
             .option('-k, --key <key>', 'key to unlock service config')
-            .option('-t, --token <token>', 'config token to use service')
+            .option('-t, --token <token>', 'config token to use service if private')
             .option('-r, --repo <repo>', 'repo name')
             .option('-s, --server <server>', 'jitploy server to connect to')
             .option('-e, --env <env>', 'unlocks for x enviroment')
@@ -231,7 +220,7 @@ var cli = {
         if(commander.args.length === 0){commander.help();}
     },
     run: function(service, options){
-        if(!options.token && !options.repo){                        // given required options are missing
+        if(!options.repo){                        // given required options are missing
             console.log('missing required config vars');
             process.exit(1);
         }
@@ -258,7 +247,7 @@ var cli = {
 if(process.env.DAEMON === DAEMON_MODE){  // given program is being called as a pm2 deamon
     run.deploy(process.env.SERVICE, process.env.key, process.env.enviroment, function startJitploy(){
         jitploy.init({                   // start up socket client when service is deployed
-            token: process.env.token,
+            token: process.env.token ? process.env.token : 0, // default to public (zero) if no token passed
             repo: process.env.repo,
             server: process.env.server
         });
