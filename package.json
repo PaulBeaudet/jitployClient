@@ -1,6 +1,6 @@
 {
     "name": "jitploy",
-    "version": "2.3.4",
+    "version": "2.4.0",
     "description": "service that manages deployment of others services",
     "main": "jitploy.js",
     "bin": {
