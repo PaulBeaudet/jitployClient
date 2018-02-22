@@ -38,8 +38,8 @@ var jitploy = {
     firstConnect: function(repoRequest){
         jitploy.client.on('connect', function authenticate(){ // connect with orcastrator
            jitploy.client.emit('authenticate', repoRequest);  // NOTE assumes TLS is in place otherwise this is useless
-           jitploy.client.on('deploy', run.deploy);           // respond to deploy events
         });
+        jitploy.client.on('deploy', run.deploy);              // respond to deploy events
     }
 };
 
