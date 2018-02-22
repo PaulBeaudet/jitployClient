@@ -17,19 +17,29 @@ var CONFIG_FOLDER = '/jitploy';
 var ALGORITHM = 'aes-128-cbc';
 
 var jitploy = {
-    SERVER: 'https://jitploy.deabute.com/',                        // Defaults to sass server, you can run your own if you like
-    init: function(options){
-        if(options && options.repo){
-            if(options.server){jitploy.SERVER = options.server;}
-            jitploy.client = ioclient(jitploy.SERVER);             // jitploy socket server connection initiation
-            jitploy.client.on('connect', function authenticate(){  // connect with orcastrator
-                jitploy.client.emit('authenticate', {                       // NOTE assumes TLS is in place otherwise this is useless
-                    token: options.token,
-                    name: options.repo
-                });                                                // its important lisner know that we are for real
-                jitploy.client.on('deploy', run.deploy);           // respond to deploy events
-            });
-        } else {console.log('Configuration issues');}              // maybe process should end itself if this is true
+    SERVER: 'https://jitploy.deabute.com/',            // Defaults to sass server, you can run your own if you like
+    init: function(repoName, server, token, servicePath){
+        if(server){jitploy.SERVER = server;}
+        jitploy.client = ioclient(jitploy.SERVER);     // jitploy socket server connection initiation
+        var repoRequest = {token: token ? token : 0};  // default to public (zero) if no token passed
+        if(repoName){
+            repoRequest.name = repoName;
+            jitploy.firstConnect(repoRequest);
+        } else {                                       // given no name was passed default to package.json information
+            var packageInfo = require(servicePath + '/package.json');
+            if(packageInfo.hasOwnProperty('repository') && packageInfo.repository.hasOwnProperty('url')){
+                var urlParts = packageInfo.repository.url.split('+');     // split out git+ prefix commonly found
+                if(urlParts.length === 2){repoRequest.url = urlParts[1];} // given we hade perfix use second element
+                else {repoRequest.url = urlParts[0];}                     // maybe there was just a cloneable url?
+                jitploy.firstConnect(repoRequest);
+            } else { console.log('Not enough information to connect to server');}
+        }
+    },
+    firstConnect: function(repoRequest){
+        jitploy.client.on('connect', function authenticate(){ // connect with orcastrator
+           jitploy.client.emit('authenticate', repoRequest);  // NOTE assumes TLS is in place otherwise this is useless
+           jitploy.client.on('deploy', run.deploy);           // respond to deploy events
+        });
     }
 };
 
@@ -169,7 +179,6 @@ var run = {
     deploy: function(service, configKey, env, jitployStart){       // runs either on start up or every time jitploy server pings
         if(service){                                               // given this is being called from cli
             run.service = service;
-            run.servicePath = path.resolve(path.dirname(service)); // path of file that is passed
             if(configKey){run.config = configKey;}                 // Set config key, if we have something to decrypt and something to do it with
         }
         run.pull(env, jitployStart);                               // remember we get nothing when server triggers deploy
@@ -220,10 +229,6 @@ var cli = {
         if(commander.args.length === 0){commander.help();}
     },
     run: function(service, options){
-        if(!options.repo){                        // given required options are missing
-            console.log('missing required config vars');
-            process.exit(1);
-        }
         daemon.startup(process.argv[1], {  // Env vars to pass jitploy deamon
             key: options.key,
             token: options.token,
@@ -245,12 +250,9 @@ var cli = {
 };
 
 if(process.env.DAEMON === DAEMON_MODE){  // given program is being called as a pm2 deamon
+    run.servicePath = path.resolve(path.dirname(process.env.SERVICE)); // path of file that is passed TODO create method push to array of services
     run.deploy(process.env.SERVICE, process.env.key, process.env.enviroment, function startJitploy(){
-        jitploy.init({                   // start up socket client when service is deployed
-            token: process.env.token ? process.env.token : 0, // default to public (zero) if no token passed
-            repo: process.env.repo,
-            server: process.env.server
-        });
+        jitploy.init(process.env.repo, process.env.server, process.env.token, run.servicePath);       // start up socket client when service is deployed
     });                                  // run.deploy called in this manner initiates deployment steps
 } else {
     cli.setup();                         // Assume process is being called from commandline when without DAEMON_MODE ENV
