@@ -28,9 +28,7 @@ var jitploy = {
         } else {                                       // given no name was passed default to package.json information
             var packageInfo = require(servicePath + '/package.json');
             if(packageInfo.hasOwnProperty('repository') && packageInfo.repository.hasOwnProperty('url')){
-                var urlParts = packageInfo.repository.url.split('+');     // split out git+ prefix commonly found
-                if(urlParts.length === 2){repoRequest.url = urlParts[1];} // given we hade perfix use second element
-                else {repoRequest.url = urlParts[0];}                     // maybe there was just a cloneable url?
+                repoRequest.url = packageInfo.repository.url.split('//')[1];  // split out git+https// or ssh// prefix commonly found
                 jitploy.firstConnect(repoRequest);
             } else { console.log('Not enough information to connect to server');}
         }
