@@ -15,6 +15,7 @@ var ioclient  = require('socket.io-client'); // to connect to our jitploy interg
 var DAEMON_MODE = 'deamon_mode';
 var CONFIG_FOLDER = '/jitploy';
 var ALGORITHM = 'aes-128-cbc';
+var DEMO_ENV = 'sample';
 
 var jitploy = {
     SERVER: 'https://jitploy.deabute.com/',            // Defaults to sass server, you can run your own if you like
@@ -42,24 +43,25 @@ var jitploy = {
 };
 
 var config = {
-    env: 'local', // hard coding to local for now
+    env: DEMO_ENV,                   // Default to demo mode to publically demostrate how service could be run
     decrypt: function(configKey, cwd, onFinish, env){
-        if(env){config.env = env;} // If specified change default env to specified one so that it is called on subsequent deploys
-        else{env = config.env;}    // Given no specification use default env
-        if(configKey){             // shared secret aka important part of decrypting something
-            fs.stat(cwd + CONFIG_FOLDER + '/encrypted_' + env, function onFileCheck(error, stats){
+        if(env){config.env = env;}   // If specified change default env to specified one so that it is called on subsequent deploys
+        if(config.env === DEMO_ENV){ // In this case there is a plain text yml file that is an example
+            template.atemp(cwd + CONFIG_FOLDER + '/' + DEMO_ENV + '.yml', config.env, onFinish); // try to open a demo or create a template one
+        } else if(configKey){        // shared secret aka important part of decrypting something
+            fs.stat(cwd + CONFIG_FOLDER + '/encrypted_' + config.env, function onFileCheck(error, stats){
                 if(error){
                     console.log(error);
                     onFinish();
                 } else if(stats.isFile()){ // if this file exist we have something to read from and a folder to write into
-                    var readFile = fs.createReadStream(cwd + CONFIG_FOLDER + '/encrypted_' + env);
+                    var readFile = fs.createReadStream(cwd + CONFIG_FOLDER + '/encrypted_' + config.env);
                     var sharedKey = configKey.substr(0, configKey.length/2);
                     var iv = configKey.substr(configKey.length/2, configKey.length);
                     var decrypt = crypto.createDecipheriv(ALGORITHM,  new Buffer(sharedKey, 'base64'), new Buffer(iv, 'base64'));
-                    var writeFile = fs.createWriteStream(cwd + CONFIG_FOLDER + '/decrypted_' + env + '.yml');
+                    var writeFile = fs.createWriteStream(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.yml');
                     readFile.pipe(decrypt).pipe(writeFile);
                     writeFile.on('finish', function(){
-                        fs.readFile(cwd + CONFIG_FOLDER + '/decrypted_' + env + '.yml', 'utf8', function(err, data){
+                        fs.readFile(cwd + CONFIG_FOLDER + '/decrypted_' + config.env + '.yml', 'utf8', function(err, data){
                             onFinish(yaml.safeLoad(data));   // pass env vars and call next thing to do
                         });
                     });
@@ -67,60 +69,79 @@ var config = {
             });
         } else {onFinish();} // No encrypted config is an option, in this case just pass through
     },
-    lock: function(dir, env, tempOnly){   // Polymorphic, creates template or encrypts potential changes and additions
-        if(!env){env = config.env;}
+    init: function(dir, env, tempOnly){   // Polymorphic, creates template or encrypts potential changes and additions
         var servicePath = path.resolve(path.dirname(dir));
-        fs.mkdir(servicePath + CONFIG_FOLDER, function(mkdirError){
+        var configFile = servicePath + CONFIG_FOLDER + '/' + DEMO_ENV + '.yml';
+        if(env){configFile = servicePath + CONFIG_FOLDER + '/decrypted_' + env + '.yml';}
+        else {env = DEMO_ENV; tempOnly = true;}                     // no locking in demo case
+        fs.mkdir(servicePath + CONFIG_FOLDER, function(mkdirError){ // if dir exist make template, otherwise make dir and template
             if(mkdirError){
-                if(mkdirError.code === 'EEXIST'){config.template(servicePath, env, tempOnly);} // Internet said this was a bad idea
+                if(mkdirError.code === 'EEXIST'){template.atemp(configFile, env, config.lock(servicePath, env, tempOnly));}
                 else {console.log('Error on making directory: ' + mkdirError);}
             } else { // given this is first time configuring, want to exclude decrypted file patterns from version control
-                fs.appendFile(servicePath + '/.gitignore', CONFIG_FOLDER.substr(1, CONFIG_FOLDER.length) + '/decrypted_*', function addedToGitignore(appendError){
-                    if(appendError){console.log('Failed to exclude decrypted file from git, you might want to manually do that: ' + appendError);}
-                    config.template(servicePath, env, tempOnly); // Create decrypted file template regardless
-                });
-            }
-        });
-    },
-    template: function(servicePath, env, tempOnly){
-        var configFile = servicePath + CONFIG_FOLDER + '/decrypted_' + env + '.yml';
-        fs.open(configFile, 'wx', function template(error, fileData){
-            if(error){
-                if(error.code === 'EEXIST' && !tempOnly){                    // In case where decrypted file exist
-                    fs.readFile(configFile, function readTheFile(readErr, data){
-                        var existing = yaml.safeLoad(data);
-                        if(existing.JITPLOY_SHARED_KEY){
-                            var sharedKey = existing.JITPLOY_SHARED_KEY.substr(0, existing.JITPLOY_SHARED_KEY.length/2);
-                            var iv = existing.JITPLOY_SHARED_KEY.substr(existing.JITPLOY_SHARED_KEY.length/2, existing.JITPLOY_SHARED_KEY.length);
-                            config.encrypt(servicePath, env, sharedKey, iv);
-                        } else {console.log('shared key is missing, not sure what to do');}
-                    });
-                } else { console.log('on attempting to work config file: ' + error);}
-            } else {
-                var sharedSecret = crypto.randomBytes(16).toString('base64');
-                var initializationVector = crypto.randomBytes(16).toString('base64');
-                fs.writeFile(fileData,
-                    '# Add properties to this module in order set configuration for ' + env + ' environment\n' +
-                    '{\n' +
-                    '    JITPLOY_SHARED_KEY: \'' + sharedSecret + initializationVector + '\' # Shared key for remote target enviroment, encrypts this file\n' +
-                    '}\n',
-                    function onWrite(writeErr){ // TODO create key and iv write them to file
-                        if(writeErr){console.log('template write error: ' + writeErr);}
-                        else{
-                            console.log('Configuration template made for ' + env + ' at ' + configFile);
-                            console.log('Edit this file to add enviroment variables that will be decrypted by a shared key on deployment');
-                        }
+                fs.appendFile(servicePath + '/.gitignore', CONFIG_FOLDER.substr(1, CONFIG_FOLDER.length) + '/decrypted_*',
+                    function addedToGitignore(appendError){
+                        if(appendError){console.log('Failed to exclude decrypted file from git, you might want to manually do that: ' + appendError);}
+                        template.atemp(configFile, env, config.lock(servicePath, env, tempOnly)); // Create decrypted file template regardless
                     }
                 );
             }
         });
     },
-    encrypt: function(servicePath, env, sharedSecret, iv){
-        fs.stat(servicePath + CONFIG_FOLDER + '/encrypted_' + env, function template(error, stats){ // test if we have env file we are looking for
-            var readFile = fs.createReadStream(servicePath + CONFIG_FOLDER + '/decrypted_' + env + '.yml');
-            var encrypt = crypto.createCipheriv(ALGORITHM, new Buffer(sharedSecret, 'base64'), new Buffer(iv, 'base64'));
-            var writeFile = fs.createWriteStream(servicePath + CONFIG_FOLDER + '/encrypted_' + env);
-            readFile.pipe(encrypt).pipe(writeFile);
+    lock: function(servicePath, env, tempOnly){
+        if(tempOnly){ // in case of demo env or template option we only want a decrypted file
+            return function(existing){console.log('No encryption needed for ' + env + ' at this time');};
+        } else {      // otherwise we want to encrypt an existing file we are pointed at
+            return function(existing){
+                if(existing){ // give an existing config was found "existing" should be that object
+                    if(existing.JITPLOY_SHARED_KEY){
+                        var sharedKey = existing.JITPLOY_SHARED_KEY.substr(0, existing.JITPLOY_SHARED_KEY.length/2);
+                        var iv = existing.JITPLOY_SHARED_KEY.substr(existing.JITPLOY_SHARED_KEY.length/2, existing.JITPLOY_SHARED_KEY.length);
+                        config.encrypt(servicePath, env, sharedKey, iv);
+                    } else {console.log('shared key is missing, need it to lock this config');}
+                } // else this function may have been called on creation of a template
+            };
+        }
+    },
+    encrypt: function(servicePath, env, sharedSecret, iv){ // existance of read file should already be verified
+        var readFile = fs.createReadStream(servicePath + CONFIG_FOLDER + '/decrypted_' + env + '.yml');
+        var encrypt = crypto.createCipheriv(ALGORITHM, new Buffer(sharedSecret, 'base64'), new Buffer(iv, 'base64'));
+        var writeFile = fs.createWriteStream(servicePath + CONFIG_FOLDER + '/encrypted_' + env);
+        readFile.pipe(encrypt).pipe(writeFile);
+    }
+};
+
+var template = {
+    create: function(fileData, env, configFile, onExist){
+        var sharedSecret = crypto.randomBytes(16).toString('base64') + crypto.randomBytes(16).toString('base64');
+        fs.writeFile(fileData,
+            '# Add properties to this module in order set configuration for ' + env + ' environment\n' +
+            '{\n' +
+            '    JITPLOY_SHARED_KEY: \'' + sharedSecret + '\', # Shared key for remote target enviroment, encrypts this file if not demo\n' +
+            '    YOUR_ENV_VAR: \'might want to lint your yml\' # Jitploy expects a json like object to transform to enviroment vars\n' +
+            '}\n',
+            function onWrite(error){
+                if(error){console.log('template write error: ' + error);}
+                else{
+                    console.log('Configuration template made for ' + env + ' at ' + configFile);
+                    console.log('Edit this file to add enviroment variables that will be decrypted by a shared key on deployment');
+                }
+                onExist(); // cause why hold deployment up for errors
+            }
+        );
+    },
+    atemp: function(configFile, env, onExist){ // attempts to create a template and locks existing file if thats whats blocking it
+        fs.open(configFile, 'wx', function readOrCreate(error, fileData){
+            if(error){
+                if(error.code === 'EEXIST'){                    // In case where decrypted file exist
+                    fs.readFile(configFile, function readTheFile(readErr, data){
+                        if(readErr){console.log(readErr);}
+                        else{onExist(yaml.safeLoad(data));}
+                    });
+                } else { console.log('on attempting to work config file: ' + error);}
+            } else {
+                template.create(fileData, env, configFile, onExist);
+            }
         });
     }
 };
@@ -188,7 +209,7 @@ var run = {
             }, env); // decrypt configuration if it exist then install
         }, function pullFail(code){console.log('no pull? ' + code);});
     },
-    install: function(configVars, jitployStart){ //  npm install step, reflect package.json changes and probably restart when done
+    install: function(configVars, jitployStart){    // npm install step, reflect package.json changes and probably restart when done
         run.cmd('npm install', 'npmInstall', function installSuccess(){
             daemon.deploy(run.service, configVars); // once npm install is complete restart service
             if(jitployStart){setTimeout(jitployStart, 2000);} // only connect with jitploy server if service successfully launches
@@ -214,7 +235,7 @@ var cli = {
             .command('lock')
             .usage('[options] <directory ...>')
             .description('encrypts configuration, on templates a decrypted file if its non existent')
-            .action(function encryptIt(dir, options){config.lock(dir, options.parent.env);});
+            .action(function encryptIt(dir, options){config.init(dir, options.parent.env);});
         commander
             .command('unlock')
             .usage('[options] <directory ...>')
@@ -222,7 +243,7 @@ var cli = {
         commander
             .command('template')
             .usage('[options] <directory ...>')
-            .action(function templateConfig(dir, options){config.lock(dir, options.parent.env, true);}); // Pass true for template only option
+            .action(function templateConfig(dir, options){config.init(dir, options.parent.env, true);}); // Pass true for template only option
         commander.parse(process.argv);
         if(commander.args.length === 0){commander.help();}
     },
